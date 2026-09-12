@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { ShieldCheck, Microscope, Gavel, RefreshCw, Upload, Award } from "lucide-react";
+import { 
+  ShieldCheck, Microscope, Gavel, RefreshCw, Upload, Award, FileText, 
+  Eye, CheckCircle2, AlertTriangle, X 
+} from "lucide-react";
 import { api } from "../services/api";
 import { WatermarkViewer } from "../components/WatermarkViewer";
 import { BlockExplorer } from "../components/BlockExplorer";
@@ -14,6 +17,13 @@ export const ForensicAndJudicialDashboard: React.FC<ForensicAndJudicialDashboard
   const [cases, setCases] = useState<any[]>([]);
   const [viewingDocId, setViewingDocId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"INBOX" | "BLOCKCHAIN">("INBOX");
+
+  // Detailed Evidence Dossier Inspection Modal
+  const [inspectingCase, setInspectingCase] = useState<any | null>(null);
+  const [tamperReport, setTamperReport] = useState<any | null>(null);
+  const [auditingTamper, setAuditingTamper] = useState(false);
+  const [docVerifMap, setDocVerifMap] = useState<Record<string, any>>({});
+  const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
 
   // Upload Forensic Report Modal
   const [uploadingCaseId, setUploadingCaseId] = useState<string | null>(null);
@@ -37,6 +47,46 @@ export const ForensicAndJudicialDashboard: React.FC<ForensicAndJudicialDashboard
   useEffect(() => {
     loadData();
   }, [user]);
+
+  const handleInspectCase = async (caseId: string) => {
+    setTamperReport(null);
+    setDocVerifMap({});
+    try {
+      const res = await api.getCaseDetails(caseId);
+      setInspectingCase(res);
+    } catch (err: any) {
+      alert(err.message || "Failed to load case dossier.");
+    }
+  };
+
+  const handleAuditCaseTamper = async (caseId: string) => {
+    setAuditingTamper(true);
+    try {
+      const res = await api.verifyCaseTamper(caseId);
+      setTamperReport(res);
+      const map: Record<string, any> = {};
+      res.reports?.forEach((r: any) => {
+        map[r.document_id] = r;
+      });
+      setDocVerifMap(map);
+    } catch (err: any) {
+      alert(err.message || "Case evidence tamper verification failed.");
+    } finally {
+      setAuditingTamper(false);
+    }
+  };
+
+  const handleVerifySingleDoc = async (docId: string) => {
+    setVerifyingDocId(docId);
+    try {
+      const res = await api.verifyDocument(docId);
+      setDocVerifMap(prev => ({ ...prev, [docId]: res }));
+    } catch (err: any) {
+      alert("Verification check failed.");
+    } finally {
+      setVerifyingDocId(null);
+    }
+  };
 
   const handleUploadReport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,6 +197,14 @@ export const ForensicAndJudicialDashboard: React.FC<ForensicAndJudicialDashboard
 
                       <div style={{ display: "flex", gap: "10px" }}>
                         <button
+                          className="btn btn-secondary"
+                          style={{ padding: "6px 12px", fontSize: "0.82rem", display: "flex", alignItems: "center", gap: "6px", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                          onClick={() => handleInspectCase(s.case_id)}
+                        >
+                          <ShieldCheck size={14} color="#38bdf8" />
+                          Inspect Evidence &amp; Verify Hash
+                        </button>
+                        <button
                           className="btn btn-primary"
                           style={{ padding: "6px 14px", fontSize: "0.82rem" }}
                           onClick={() => setUploadingCaseId(s.case_id)}
@@ -205,18 +263,11 @@ export const ForensicAndJudicialDashboard: React.FC<ForensicAndJudicialDashboard
 
                       <button
                         className="btn btn-primary"
-                        style={{ padding: "6px 14px", fontSize: "0.82rem" }}
-                        onClick={async () => {
-                          const det = await api.getCaseDetails(c.case_id);
-                          if (det.documents?.length > 0) {
-                            setViewingDocId(det.documents[0].document_id);
-                          } else {
-                            alert("No documents attached to this case yet.");
-                          }
-                        }}
+                        style={{ padding: "6px 14px", fontSize: "0.82rem", display: "flex", alignItems: "center", gap: "6px" }}
+                        onClick={() => handleInspectCase(c.case_id)}
                       >
                         <ShieldCheck size={16} />
-                        Inspect &amp; Verify Admissibility
+                        Inspect Case Evidence &amp; Admissibility
                       </button>
                     </div>
                   ))}
@@ -225,6 +276,188 @@ export const ForensicAndJudicialDashboard: React.FC<ForensicAndJudicialDashboard
             </div>
           )}
         </>
+      )}
+
+      {/* Case Dossier & Evidence Tamper Inspection Modal */}
+      {inspectingCase && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "880px", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+            {/* Modal Header */}
+            <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border-subtle)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                  <span className="mono" style={{ fontSize: "1.05rem", fontWeight: 800, color: "#38bdf8" }}>
+                    {inspectingCase.case.fir_number}
+                  </span>
+                  <span className="gov-badge badge-blue">{inspectingCase.case.state} Police</span>
+                  <span className="gov-badge badge-gold">{inspectingCase.case.sensitivity_level}</span>
+                </div>
+                <h3 style={{ fontSize: "1.15rem", color: "#f8fafc", margin: 0 }}>
+                  {inspectingCase.case.title}
+                </h3>
+              </div>
+              <button className="btn btn-secondary" style={{ padding: "6px 10px" }} onClick={() => setInspectingCase(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+              {/* Top Action Bar */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+                <div>
+                  <strong style={{ fontSize: "0.95rem", color: "#f8fafc" }}>
+                    Attached Evidence Artifacts ({inspectingCase.documents?.length || 0})
+                  </strong>
+                  <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: "2px 0 0" }}>
+                    Each document is bound to a unique AES-256-GCM key and anchored to the Sovereign Blockchain.
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: "6px 12px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: "6px", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                    onClick={() => handleAuditCaseTamper(inspectingCase.case.case_id)}
+                    disabled={auditingTamper}
+                  >
+                    <ShieldCheck size={14} color="#38bdf8" className={auditingTamper ? "animate-spin" : ""} />
+                    {auditingTamper ? "Auditing All Hashes..." : "Run Section 63 BSA Tamper Audit"}
+                  </button>
+
+                  {!isJudge && (
+                    <button
+                      className="btn btn-primary"
+                      style={{ padding: "6px 12px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: "6px" }}
+                      onClick={() => {
+                        setUploadingCaseId(inspectingCase.case.case_id);
+                        setInspectingCase(null);
+                      }}
+                    >
+                      <Upload size={14} />
+                      Attach Certified Report
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Tamper Audit Report Banner */}
+              {tamperReport && (
+                <div style={{
+                  background: tamperReport.all_authentic ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                  border: `1px solid ${tamperReport.all_authentic ? "#10b981" : "#ef4444"}`,
+                  padding: "12px 16px",
+                  borderRadius: "var(--radius-md)",
+                  marginBottom: "16px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    {tamperReport.all_authentic ? <CheckCircle2 size={20} color="#10b981" /> : <AlertTriangle size={20} color="#ef4444" />}
+                    <div>
+                      <strong style={{ fontSize: "0.92rem", color: tamperReport.all_authentic ? "#6ee7b7" : "#fca5a5" }}>
+                        {tamperReport.all_authentic 
+                          ? `100% Tamper-Proof Admissibility Confirmed: All ${tamperReport.total_documents} evidence files verified against Consortium Blockchain!`
+                          : `TAMPER ALERT: ${tamperReport.compromised_count} evidence file(s) failed cryptographic verification!`}
+                      </strong>
+                      <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                        Bharatiya Sakshya Adhiniyam Sec 63 Compliance Verified
+                      </div>
+                    </div>
+                  </div>
+                  <span className="mono" style={{ fontSize: "0.82rem", fontWeight: 700, color: "#38bdf8" }}>
+                    {tamperReport.verified_count}/{tamperReport.total_documents} PASS
+                  </span>
+                </div>
+              )}
+
+              {/* Evidence Documents List */}
+              {inspectingCase.documents?.length === 0 ? (
+                <div style={{ padding: "30px", textAlign: "center", color: "var(--text-muted)", background: "#061120", borderRadius: "var(--radius-md)" }}>
+                  No evidence files attached to this case yet.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {inspectingCase.documents.map((doc: any) => (
+                    <div
+                      key={doc.document_id}
+                      style={{
+                        background: "#061120",
+                        border: "1px solid var(--border-subtle)",
+                        borderRadius: "var(--radius-md)",
+                        padding: "12px 16px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <div style={{
+                          width: "36px",
+                          height: "36px",
+                          borderRadius: "8px",
+                          background: "rgba(59, 130, 246, 0.15)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center"
+                        }}>
+                          <FileText size={18} color="#60a5fa" />
+                        </div>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <strong style={{ fontSize: "0.9rem", color: "#f8fafc" }}>{doc.file_name}</strong>
+                            <span className="gov-badge badge-blue">{doc.file_type}</span>
+                            {doc.is_redacted === 1 && (
+                              <span className="gov-badge badge-gold">BNS Sec 72 Redacted</span>
+                            )}
+                          </div>
+                          <div className="mono" style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "2px" }}>
+                            Police Seizure Hash: {doc.content_hash_sha256}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        {docVerifMap[doc.document_id] && (
+                          docVerifMap[doc.document_id].verified ? (
+                            <span className="gov-badge badge-green" style={{ fontSize: "0.72rem", display: "flex", alignItems: "center", gap: "4px" }}>
+                              <CheckCircle2 size={12} /> Block #{docVerifMap[doc.document_id].block_number || docVerifMap[doc.document_id].ledger_block} Authentic
+                            </span>
+                          ) : (
+                            <span className="gov-badge badge-red" style={{ fontSize: "0.72rem", display: "flex", alignItems: "center", gap: "4px" }}>
+                              <AlertTriangle size={12} /> TAMPER ALERT
+                            </span>
+                          )
+                        )}
+
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: "6px 10px", fontSize: "0.76rem" }}
+                          onClick={() => handleVerifySingleDoc(doc.document_id)}
+                          disabled={verifyingDocId === doc.document_id}
+                          title="Verify document SHA-256 live against blockchain anchor"
+                        >
+                          <ShieldCheck size={13} color="#38bdf8" className={verifyingDocId === doc.document_id ? "animate-spin" : ""} />
+                          {verifyingDocId === doc.document_id ? "Checking..." : "Tamper Check"}
+                        </button>
+
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: "6px 12px", fontSize: "0.78rem" }}
+                          onClick={() => setViewingDocId(doc.document_id)}
+                        >
+                          <Eye size={14} />
+                          View In-Memory
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Consortium Ledger Tab */}

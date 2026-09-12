@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.core.security import decode_access_token
 from app.core.device import verify_departmental_device
 from app.models.database import get_db_connection
+from app.ledger.blockchain import SovereignConsortiumLedger
 
 router = APIRouter(prefix="/api/cases", tags=["Case Management"])
 
@@ -145,7 +146,8 @@ def get_case_details(case_id: str, user: dict = Depends(get_current_user_token),
 
     # Check jurisdictional authorization
     is_authorized = (
-        case_data["state"] == user.get("state") and case_data["station_id"] == user.get("station_id")
+        (case_data["state"] == user.get("state") and case_data["station_id"] == user.get("station_id"))
+        or (user.get("role") in ["JUDICIAL_MAGISTRATE", "PUBLIC_PROSECUTOR"] and case_data["state"] == user.get("state") and case_data["district"] == user.get("district"))
     )
     if not is_authorized and user.get("role") != "SYSTEM_ADMIN":
         # Check targeted shares
@@ -173,4 +175,100 @@ def get_case_details(case_id: str, user: dict = Depends(get_current_user_token),
         "case": case_data,
         "documents": docs,
         "shares": shares
+    }
+
+@router.get("/{case_id}/verify-tamper")
+def verify_case_tamper(case_id: str, user: dict = Depends(get_current_user_token)):
+    """
+    Case-Wide Cryptographic Tamper Audit:
+    Performs live SHA-256 verification against the Sovereign Consortium Blockchain
+    for ALL evidence documents attached to this case. Accessible to IO, Forensics, and Judges.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM cases WHERE case_id = ?;", (case_id,))
+    case_row = cursor.fetchone()
+    if not case_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Case record not found.")
+
+    case_data = dict(case_row)
+    is_authorized = (
+        (case_data["state"] == user.get("state") and case_data["station_id"] == user.get("station_id"))
+        or (user.get("role") in ["JUDICIAL_MAGISTRATE", "PUBLIC_PROSECUTOR"] and case_data["state"] == user.get("state") and case_data["district"] == user.get("district"))
+    )
+    if not is_authorized and user.get("role") != "SYSTEM_ADMIN":
+        cursor.execute(
+            "SELECT COUNT(*) FROM targeted_shares WHERE case_id = ? AND recipient_dept = ? AND status = 'ACTIVE';",
+            (case_id, user.get("station_id"))
+        )
+        if cursor.fetchone()[0] == 0:
+            conn.close()
+            raise HTTPException(status_code=403, detail="Jurisdictional Isolation: Access denied.")
+
+    cursor.execute("SELECT * FROM documents WHERE case_id = ? ORDER BY created_at ASC;", (case_id,))
+    docs = [dict(d) for d in cursor.fetchall()]
+    conn.close()
+
+    from app.core.config import VAULT_DIR
+    from app.core.security import decrypt_bytes, compute_sha256
+    import base64
+
+    doc_reports = []
+    compromised_count = 0
+
+    for doc in docs:
+        enc_file_path = VAULT_DIR / doc["file_path_enc"]
+        if not enc_file_path.exists():
+            doc_reports.append({
+                "document_id": doc["document_id"],
+                "file_name": doc["file_name"],
+                "status": "VAULT_FILE_MISSING",
+                "verified": False,
+                "is_compromised": True
+            })
+            compromised_count += 1
+            continue
+
+        with open(enc_file_path, "rb") as f:
+            cipher_bytes = f.read()
+
+        dek = bytes.fromhex(doc["dek_hex"])
+        try:
+            plaintext = decrypt_bytes(
+                base64.b64encode(cipher_bytes).decode("utf-8"),
+                doc["nonce_b64"],
+                dek,
+                associated_data=f"{doc['document_id']}:{doc['case_id']}".encode("utf-8")
+            )
+            live_hash = compute_sha256(plaintext)
+        except Exception:
+            live_hash = compute_sha256(cipher_bytes)
+
+        ledger_result = SovereignConsortiumLedger.verify_document_integrity(doc["document_id"], live_hash)
+        is_verified = ledger_result.get("verified", False)
+        if not is_verified:
+            compromised_count += 1
+
+        doc_reports.append({
+            "document_id": doc["document_id"],
+            "file_name": doc["file_name"],
+            "file_type": doc["file_type"],
+            "anchored_hash": doc["content_hash_sha256"],
+            "live_hash": live_hash,
+            "verified": is_verified,
+            "is_compromised": not is_verified,
+            "ledger_block": ledger_result.get("block_number"),
+            "ledger_timestamp": ledger_result.get("timestamp")
+        })
+
+    return {
+        "case_id": case_id,
+        "fir_number": case_data["fir_number"],
+        "total_documents": len(docs),
+        "verified_count": len(docs) - compromised_count,
+        "compromised_count": compromised_count,
+        "all_authentic": (compromised_count == 0),
+        "reports": doc_reports
     }

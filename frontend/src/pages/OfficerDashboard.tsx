@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Folder, FilePlus, Share2, Shield, Upload, FileText, Lock, Eye, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Folder, FilePlus, Share2, Shield, Upload, FileText, Lock, Eye, RefreshCw, CheckCircle2, ShieldCheck, AlertTriangle } from "lucide-react";
 import { api } from "../services/api";
 import { WatermarkViewer } from "../components/WatermarkViewer";
 import { BlockExplorer } from "../components/BlockExplorer";
@@ -38,6 +38,12 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
   // View Document in memory
   const [viewingDocId, setViewingDocId] = useState<string | null>(null);
 
+  // Tamper Verification States for Officer
+  const [caseTamperReport, setCaseTamperReport] = useState<any | null>(null);
+  const [auditingCase, setAuditingCase] = useState(false);
+  const [docVerificationMap, setDocVerificationMap] = useState<Record<string, any>>({});
+  const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
+
   const fetchCases = async () => {
     try {
       const res = await api.getCases();
@@ -52,11 +58,43 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
 
   const handleSelectCase = async (caseId: string) => {
     setSelectedCaseId(caseId);
+    setCaseTamperReport(null);
+    setDocVerificationMap({});
     try {
       const res = await api.getCaseDetails(caseId);
       setCaseDetails(res);
     } catch (err: any) {
       alert(err.message || "Failed to load case details.");
+    }
+  };
+
+  const handleAuditCaseTamper = async () => {
+    if (!selectedCaseId) return;
+    setAuditingCase(true);
+    try {
+      const res = await api.verifyCaseTamper(selectedCaseId);
+      setCaseTamperReport(res);
+      const map: Record<string, any> = {};
+      res.reports?.forEach((r: any) => {
+        map[r.document_id] = r;
+      });
+      setDocVerificationMap(map);
+    } catch (err: any) {
+      alert(err.message || "Failed to audit case evidence integrity.");
+    } finally {
+      setAuditingCase(false);
+    }
+  };
+
+  const handleVerifySingleDoc = async (docId: string) => {
+    setVerifyingDocId(docId);
+    try {
+      const res = await api.verifyDocument(docId);
+      setDocVerificationMap((prev) => ({ ...prev, [docId]: res }));
+    } catch (err: any) {
+      alert("Verification check failed.");
+    } finally {
+      setVerifyingDocId(null);
     }
   };
 
@@ -278,10 +316,57 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
 
               {/* Attached Evidence & Documents */}
               <div>
-                <h3 style={{ fontSize: "1rem", color: "#f8fafc", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <Lock size={16} color="#38bdf8" />
-                  Encrypted Documents &amp; Evidence Vault ({caseDetails.documents?.length || 0})
-                </h3>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
+                  <h3 style={{ fontSize: "1rem", color: "#f8fafc", margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Lock size={16} color="#38bdf8" />
+                    Encrypted Documents &amp; Evidence Vault ({caseDetails.documents?.length || 0})
+                  </h3>
+                  {caseDetails.documents?.length > 0 && (
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: "4px 12px", fontSize: "0.76rem", display: "flex", alignItems: "center", gap: "6px", borderColor: "rgba(56, 189, 248, 0.4)" }}
+                      onClick={handleAuditCaseTamper}
+                      disabled={auditingCase}
+                      title="Perform live cryptographic verification across all files in this case against the Sovereign Blockchain"
+                    >
+                      <ShieldCheck size={14} color="#38bdf8" className={auditingCase ? "animate-spin" : ""} />
+                      {auditingCase ? "Auditing Case Integrity..." : "Audit Case Tamper Proof"}
+                    </button>
+                  )}
+                </div>
+
+                {/* Case Tamper Audit Summary Banner */}
+                {caseTamperReport && (
+                  <div style={{
+                    background: caseTamperReport.all_authentic ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                    border: `1px solid ${caseTamperReport.all_authentic ? "#10b981" : "#ef4444"}`,
+                    padding: "10px 14px",
+                    borderRadius: "var(--radius-md)",
+                    marginBottom: "12px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    fontSize: "0.82rem"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      {caseTamperReport.all_authentic ? (
+                        <CheckCircle2 size={18} color="#10b981" />
+                      ) : (
+                        <AlertTriangle size={18} color="#ef4444" />
+                      )}
+                      <span>
+                        <strong style={{ color: caseTamperReport.all_authentic ? "#6ee7b7" : "#fca5a5" }}>
+                          {caseTamperReport.all_authentic 
+                            ? `Case Evidence Verified: All ${caseTamperReport.total_documents} files intact & authentic on Blockchain!`
+                            : `CRITICAL INTEGRITY ALERT: ${caseTamperReport.compromised_count} file(s) failed hash verification!`}
+                        </strong>
+                      </span>
+                    </div>
+                    <span className="mono" style={{ fontSize: "0.74rem", color: "var(--text-secondary)" }}>
+                      {caseTamperReport.verified_count}/{caseTamperReport.total_documents} Verified
+                    </span>
+                  </div>
+                )}
 
                 {caseDetails.documents?.length === 0 ? (
                   <div style={{ background: "#061120", border: "1px dashed var(--border-subtle)", borderRadius: "var(--radius-md)", padding: "30px", textAlign: "center", color: "var(--text-muted)" }}>
@@ -332,7 +417,31 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
                           </div>
                         </div>
 
-                        <div style={{ display: "flex", gap: "8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          {/* Inline verification status if checked */}
+                          {docVerificationMap[doc.document_id] && (
+                            docVerificationMap[doc.document_id].verified ? (
+                              <span className="gov-badge badge-green" style={{ fontSize: "0.72rem", display: "flex", alignItems: "center", gap: "4px" }}>
+                                <CheckCircle2 size={12} /> Block #{docVerificationMap[doc.document_id].block_number || docVerificationMap[doc.document_id].ledger_block} Authentic
+                              </span>
+                            ) : (
+                              <span className="gov-badge badge-red" style={{ fontSize: "0.72rem", display: "flex", alignItems: "center", gap: "4px" }}>
+                                <AlertTriangle size={12} /> TAMPER ALERT
+                              </span>
+                            )
+                          )}
+
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: "6px 10px", fontSize: "0.76rem" }}
+                            onClick={() => handleVerifySingleDoc(doc.document_id)}
+                            disabled={verifyingDocId === doc.document_id}
+                            title="Verify document SHA-256 live against blockchain anchor"
+                          >
+                            <ShieldCheck size={13} color="#38bdf8" className={verifyingDocId === doc.document_id ? "animate-spin" : ""} />
+                            {verifyingDocId === doc.document_id ? "Checking..." : "Tamper Check"}
+                          </button>
+
                           <button
                             className="btn btn-secondary"
                             style={{ padding: "6px 12px", fontSize: "0.78rem" }}

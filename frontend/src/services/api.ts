@@ -153,6 +153,30 @@ export const api = {
     return res.json();
   },
 
+  getSystemHealth: async () => {
+    const res = await fetch(`${API_BASE}/api/admin/health`, { headers: getHeaders() });
+    if (!res.ok) throw new Error("Failed to fetch system health.");
+    return res.json();
+  },
+
+  runTamperScan: async () => {
+    const res = await fetch(`${API_BASE}/api/admin/tamper-watchdog/scan`, {
+      method: "POST",
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error("Tamper watchdog scan failed.");
+    return res.json();
+  },
+
+  lookupHash: async (query_hash_or_id: string) => {
+    const res = await fetch(`${API_BASE}/api/admin/verify-hash`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query_hash_or_id }),
+    });
+    return res.json();
+  },
+
   // Cases (Jurisdiction Scoped)
   getCases: async () => {
     const res = await fetch(`${API_BASE}/api/cases`, { headers: getHeaders() });
@@ -177,6 +201,15 @@ export const api = {
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.detail || "Access Denied.");
+    }
+    return res.json();
+  },
+
+  verifyCaseTamper: async (caseId: string) => {
+    const res = await fetch(`${API_BASE}/api/cases/${caseId}/verify-tamper`, { headers: getHeaders() });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Tamper audit failed.");
     }
     return res.json();
   },

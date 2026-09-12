@@ -128,6 +128,12 @@ def view_document(doc_id: str, user: dict = Depends(get_current_user_token), dev
     doc = cursor.fetchone()
     conn.close()
 
+    if user.get("role") == "SYSTEM_ADMIN":
+        raise HTTPException(
+            status_code=403,
+            detail="The Blind Admin Rule: System Administrators manage infrastructure and security health, but are cryptographically barred from decrypting or viewing investigative evidence and victim identities."
+        )
+
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
 

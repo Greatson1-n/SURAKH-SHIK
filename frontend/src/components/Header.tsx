@@ -1,6 +1,7 @@
-import React from "react";
-import { Shield, Laptop, LogOut, UserCheck } from "lucide-react";
+import React, { useState } from "react";
+import { Shield, Laptop, LogOut, UserCheck, ShieldCheck } from "lucide-react";
 import { clearAuthToken } from "../services/api";
+import { UniversalHashVerifierModal } from "./UniversalHashVerifierModal";
 
 interface HeaderProps {
   user: any;
@@ -9,6 +10,8 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ user, deviceToken, onLogout }) => {
+  const [showVerifier, setShowVerifier] = useState(false);
+
   return (
     <header className="mha-header">
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -40,6 +43,27 @@ export const Header: React.FC<HeaderProps> = ({ user, deviceToken, onLogout }) =
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+        {/* Quick Tamper & Hash Verifier Button for All Roles */}
+        {user && (
+          <button
+            className="btn btn-secondary"
+            style={{ 
+              padding: "6px 12px", 
+              fontSize: "0.78rem", 
+              display: "flex", 
+              alignItems: "center", 
+              gap: "6px",
+              borderColor: "rgba(56, 189, 248, 0.4)",
+              background: "rgba(15, 33, 55, 0.8)"
+            }}
+            onClick={() => setShowVerifier(true)}
+            title="Inspect SHA-256 hash or Document ID against Sovereign Blockchain"
+          >
+            <ShieldCheck size={15} color="#38bdf8" />
+            <span>Verify Evidence Hash</span>
+          </button>
+        )}
+
         {/* Terminal Badge */}
         <div style={{
           background: "rgba(15, 33, 55, 0.8)",
@@ -106,6 +130,11 @@ export const Header: React.FC<HeaderProps> = ({ user, deviceToken, onLogout }) =
           </button>
         )}
       </div>
+
+      <UniversalHashVerifierModal 
+        isOpen={showVerifier} 
+        onClose={() => setShowVerifier(false)} 
+      />
     </header>
   );
 };
