@@ -116,6 +116,19 @@ export const api = {
     return res.json();
   },
 
+  terminateUser: async (payload: { badge_id: string; reason: string; permanent_delete?: boolean }) => {
+    const res = await fetch(`${API_BASE}/api/admin/users/terminate`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "User termination failed.");
+    }
+    return res.json();
+  },
+
   getDevices: async () => {
     const res = await fetch(`${API_BASE}/api/admin/devices`, { headers: getHeaders() });
     return res.json();

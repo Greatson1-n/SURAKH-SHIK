@@ -67,7 +67,7 @@ def login_step_1(payload: LoginStep1Request, device_token: str = Depends(verify_
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE badge_id = ? AND is_active = 1;", (payload.badge_id,))
+    cursor.execute("SELECT * FROM users WHERE badge_id = ?;", (payload.badge_id,))
     user = cursor.fetchone()
     conn.close()
 
@@ -75,6 +75,15 @@ def login_step_1(payload: LoginStep1Request, device_token: str = Depends(verify_
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"status": "DENIED", "reason": "Invalid Departmental ID or Password."}
+        )
+
+    if user["is_active"] == 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "status": "DENIED",
+                "reason": "ACCOUNT REVOKED / SUSPENDED: Your access has been terminated by IT Administration for security violations under Section 66 of the IT Act (Illegal Use / Disciplinary Action)."
+            }
         )
 
     # Issue a temporary session token valid for 3 minutes to complete Face 2FA
@@ -209,6 +218,18 @@ def get_current_user(authorization: str = Header(None)):
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Token expired or invalid")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_active FROM users WHERE badge_id = ?;", (payload["sub"],))
+    user_row = cursor.fetchone()
+    conn.close()
+
+    if not user_row or user_row["is_active"] == 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Account revoked or suspended for security violations."
+        )
 
     return {
         "badge_id": payload["sub"],

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Users, UserPlus, Laptop, ShieldAlert, History, RefreshCw, Layers } from "lucide-react";
+import { Users, UserPlus, Laptop, ShieldAlert, History, RefreshCw, Layers, UserX, AlertTriangle } from "lucide-react";
 import { api, API_BASE } from "../services/api";
 import { BlockExplorer } from "../components/BlockExplorer";
 
@@ -21,6 +21,12 @@ export const AdminDashboard: React.FC = () => {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [formMsg, setFormMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // User Termination Modal State
+  const [terminatingUser, setTerminatingUser] = useState<any | null>(null);
+  const [terminationReason, setTerminationReason] = useState("Illegal system access / Violation of Section 66 IT Act");
+  const [isPermanentDelete, setIsPermanentDelete] = useState(false);
+  const [terminatingLoading, setTerminatingLoading] = useState(false);
 
   const revokeReason = "Field Laptop Lost / Suspected Breach";
 
@@ -88,6 +94,26 @@ export const AdminDashboard: React.FC = () => {
       loadData();
     } catch (err: any) {
       alert("Revoke failed.");
+    }
+  };
+
+  const handleTerminateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!terminatingUser) return;
+    setTerminatingLoading(true);
+    try {
+      const res = await api.terminateUser({
+        badge_id: terminatingUser.badge_id,
+        reason: terminationReason,
+        permanent_delete: isPermanentDelete,
+      });
+      alert(res.message);
+      setTerminatingUser(null);
+      loadData();
+    } catch (err: any) {
+      alert(err.message || "Failed to terminate user.");
+    } finally {
+      setTerminatingLoading(false);
     }
   };
 
@@ -344,10 +370,25 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div>
-                    <span className="gov-badge badge-green" style={{ fontSize: "0.68rem" }}>
-                      2FA ENROLLED
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+                    <span className={`gov-badge ${u.is_active === 1 ? "badge-green" : "badge-red"}`} style={{ fontSize: "0.68rem" }}>
+                      {u.is_active === 1 ? "2FA ACTIVE" : "REVOKED / SUSPENDED"}
                     </span>
+                    {u.badge_id !== "ADM-IT-SURAKH" && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: "4px 8px", fontSize: "0.72rem", color: "#fca5a5", borderColor: "rgba(239, 68, 68, 0.4)" }}
+                        onClick={() => {
+                          setTerminatingUser(u);
+                          setIsPermanentDelete(false);
+                          setTerminationReason("Illegal system access / Violation of Section 66 IT Act");
+                        }}
+                        title="Revoke clearance or delete account under illegal misuse / security condition"
+                      >
+                        <UserX size={12} />
+                        Revoke / Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -459,6 +500,104 @@ export const AdminDashboard: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {/* USER TERMINATION / REVOCATION MODAL */}
+      {terminatingUser && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "540px", borderTop: "4px solid #ef4444" }}>
+            <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border-subtle)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <AlertTriangle size={22} color="#ef4444" />
+                <h3 style={{ fontSize: "1.15rem", color: "#f87171" }}>
+                  Revoke / Terminate User Clearance
+                </h3>
+              </div>
+              <button className="btn btn-secondary" style={{ padding: "4px 8px" }} onClick={() => setTerminatingUser(null)}>
+                Cancel
+              </button>
+            </div>
+
+            <form onSubmit={handleTerminateUser} style={{ padding: "20px 24px" }}>
+              <div className="gov-card" style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.25)", marginBottom: "16px", padding: "12px" }}>
+                <p style={{ fontSize: "0.85rem", color: "#e2e8f0" }}>
+                  You are taking administrative action against:
+                  <br />
+                  <strong>{terminatingUser.full_name}</strong> (<span className="mono" style={{ color: "#38bdf8" }}>{terminatingUser.badge_id}</span>) &bull; {terminatingUser.role}
+                </p>
+              </div>
+
+              <div style={{ marginBottom: "16px" }}>
+                <label className="gov-label">Mandatory Reason (Recorded in Audit Trail)</label>
+                <select
+                  className="gov-select"
+                  value={terminationReason}
+                  onChange={(e) => setTerminationReason(e.target.value)}
+                  style={{ marginBottom: "8px" }}
+                >
+                  <option value="Illegal system access / Violation of Section 66 IT Act">
+                    Illegal system access / Violation of Section 66 IT Act
+                  </option>
+                  <option value="Unauthorized evidence extraction / Attempted data leak">
+                    Unauthorized evidence extraction / Attempted data leak
+                  </option>
+                  <option value="Compromised credentials / Suspected security breach">
+                    Compromised credentials / Suspected security breach
+                  </option>
+                  <option value="Disciplinary suspension by Departmental Vigilance Cell">
+                    Disciplinary suspension by Departmental Vigilance Cell
+                  </option>
+                  <option value="Officer transferred / Departed jurisdiction">
+                    Officer transferred / Departed jurisdiction
+                  </option>
+                </select>
+                <input
+                  type="text"
+                  className="gov-input"
+                  placeholder="Or enter custom specific violation remarks..."
+                  value={terminationReason}
+                  onChange={(e) => setTerminationReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ marginBottom: "20px" }}>
+                <label className="gov-label">Action Enforcement Type</label>
+                <div style={{ display: "flex", gap: "12px", marginTop: "6px" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.84rem", cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="delType"
+                      checked={!isPermanentDelete}
+                      onChange={() => setIsPermanentDelete(false)}
+                    />
+                    <span><strong>Suspend &amp; Revoke Access</strong> (Recommended - Preserves audit history)</span>
+                  </label>
+                </div>
+                <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.84rem", cursor: "pointer", color: "#fca5a5" }}>
+                    <input
+                      type="radio"
+                      name="delType"
+                      checked={isPermanentDelete}
+                      onChange={() => setIsPermanentDelete(true)}
+                    />
+                    <span><strong>Permanently Delete Record</strong> (Expunges user account)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setTerminatingUser(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-danger" disabled={terminatingLoading}>
+                  {terminatingLoading ? <RefreshCw className="animate-spin" size={16} /> : <UserX size={16} />}
+                  Enforce Termination
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

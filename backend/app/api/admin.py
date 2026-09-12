@@ -98,6 +98,61 @@ async def create_user(
         "badge_id": badge_id
     }
 
+class TerminateUserRequest(BaseModel):
+    badge_id: str
+    reason: str
+    permanent_delete: bool = False
+
+@router.post("/users/terminate")
+def terminate_user(
+    payload: TerminateUserRequest, 
+    admin: dict = Depends(require_admin), 
+    device_token: str = Depends(verify_departmental_device)
+):
+    """
+    Terminates / revokes or permanently deletes a user under conditions
+    such as illegal use, security violations, or disciplinary actions.
+    """
+    if payload.badge_id == "ADM-IT-SURAKH":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Operation Denied: The root System Administrator account cannot be revoked or deleted."
+        )
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT full_name, role FROM users WHERE badge_id = ?;", (payload.badge_id,))
+    target_user = cursor.fetchone()
+    if not target_user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    now_str = datetime.now(timezone.utc).isoformat()
+    action_name = "USER_PERMANENTLY_DELETED" if payload.permanent_delete else "USER_REVOKED_ILLEGAL_USE"
+
+    if payload.permanent_delete:
+        cursor.execute("DELETE FROM users WHERE badge_id = ?;", (payload.badge_id,))
+    else:
+        cursor.execute("UPDATE users SET is_active = 0 WHERE badge_id = ?;", (payload.badge_id,))
+
+    # Log to immutable audit logs
+    cursor.execute(
+        """INSERT INTO audit_logs (log_id, actor_badge, actor_role, action, target_ref, ip_address, device_id, timestamp, signature)
+        VALUES (?, ?, 'SYSTEM_ADMIN', ?, ?, '127.0.0.1', ?, ?, 'SIG-TERM');""",
+        (str(uuid.uuid4()), admin["sub"], action_name, f"User:{payload.badge_id} Reason:{payload.reason}", device_token, now_str)
+    )
+
+    conn.commit()
+    conn.close()
+
+    status_str = "permanently deleted" if payload.permanent_delete else "suspended & revoked"
+    return {
+        "status": "SUCCESS",
+        "message": f"User '{target_user['full_name']}' ({payload.badge_id}) has been {status_str}.",
+        "reason": payload.reason
+    }
+
 @router.get("/devices")
 def list_devices(admin: dict = Depends(require_admin)):
     conn = get_db_connection()
