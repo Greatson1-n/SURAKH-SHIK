@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Shield, Laptop, LogOut, UserCheck, ShieldCheck } from "lucide-react";
+import { Laptop, LogOut, UserCheck, ShieldCheck } from "lucide-react";
 import { clearAuthToken } from "../services/api";
 import { UniversalHashVerifierModal } from "./UniversalHashVerifierModal";
 
@@ -15,19 +15,17 @@ export const Header: React.FC<HeaderProps> = ({ user, deviceToken, onLogout }) =
   return (
     <header className="mha-header">
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-        <div style={{
-          width: "42px",
-          height: "42px",
-          background: "linear-gradient(135deg, #1e3a8a, #0f172a)",
-          border: "2px solid #eab308",
-          borderRadius: "8px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          boxShadow: "0 0 15px rgba(234, 179, 8, 0.3)"
-        }}>
-          <Shield size={24} color="#eab308" />
-        </div>
+        <img 
+          src="/surakh_shik_logo.svg" 
+          alt="SURAKH-SHIK Emblem" 
+          style={{ 
+            width: "44px", 
+            height: "44px", 
+            borderRadius: "50%",
+            boxShadow: "0 0 16px rgba(234, 179, 8, 0.35)",
+            display: "block"
+          }} 
+        />
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontSize: "1.1rem", fontWeight: 800, letterSpacing: "0.02em", color: "#f8fafc" }}>

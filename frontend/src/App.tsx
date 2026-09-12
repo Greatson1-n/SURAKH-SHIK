@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Shield, Lock, Camera, AlertTriangle, RefreshCw } from "lucide-react";
+import { Lock, Camera, AlertTriangle, RefreshCw } from "lucide-react";
 import { api, getDeviceToken, getAuthToken, setAuthToken, clearAuthToken } from "./services/api";
 import { Header } from "./components/Header";
 import { DeviceGateModal } from "./components/DeviceGateModal";
@@ -130,25 +130,26 @@ export const App: React.FC = () => {
             <div className="gov-card" style={{ borderTop: "4px solid #2563eb", padding: "32px 28px" }}>
               {/* Emblem & Portal Title */}
               <div style={{ textAlign: "center", marginBottom: "24px" }}>
-                <div style={{
-                  width: "56px",
-                  height: "56px",
-                  margin: "0 auto 12px",
-                  background: "linear-gradient(135deg, #1e3a8a, #0b192c)",
-                  borderRadius: "12px",
-                  border: "2px solid #eab308",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: "0 0 20px rgba(234, 179, 8, 0.25)"
-                }}>
-                  <Shield size={32} color="#eab308" />
-                </div>
-                <h2 style={{ fontSize: "1.35rem", color: "#f8fafc" }}>
-                  National Secure Case Portal
+                <img 
+                  src="/surakh_shik_logo.svg" 
+                  alt="SURAKH-SHIK Official Emblem" 
+                  style={{ 
+                    width: "72px", 
+                    height: "72px", 
+                    margin: "0 auto 12px",
+                    borderRadius: "50%",
+                    boxShadow: "0 0 24px rgba(234, 179, 8, 0.4)",
+                    display: "block"
+                  }} 
+                />
+                <h2 style={{ fontSize: "1.4rem", color: "#f8fafc", fontWeight: 800, letterSpacing: "0.02em" }}>
+                  SURAKH-SHIK (सुरक्षा-साक्ष्य)
                 </h2>
-                <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: "4px" }}>
-                  Ministry of Home Affairs &bull; Problem Statement 26190
+                <p style={{ fontSize: "0.84rem", color: "#93c5fd", marginTop: "2px", fontWeight: 600 }}>
+                  National Secure Case &amp; Evidence Portal
+                </p>
+                <p style={{ fontSize: "0.76rem", color: "var(--text-secondary)", marginTop: "2px" }}>
+                  Ministry of Home Affairs &bull; National Crime Records Bureau &bull; PS 26190
                 </p>
                 <div style={{ display: "inline-block", marginTop: "10px" }}>
                   <span className="gov-badge badge-blue">
