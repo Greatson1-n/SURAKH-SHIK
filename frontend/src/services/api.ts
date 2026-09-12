@@ -93,6 +93,17 @@ export const api = {
     return res.json();
   },
 
+  logoutSession: async () => {
+    try {
+      await fetch(`${API_BASE}/api/auth/logout`, {
+        method: "POST",
+        headers: getHeaders(),
+      });
+    } catch {
+      // ignore network errors during exit
+    }
+  },
+
   // Admin
   getUsers: async () => {
     const res = await fetch(`${API_BASE}/api/admin/users`, { headers: getHeaders() });

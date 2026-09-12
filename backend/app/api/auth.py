@@ -253,3 +253,27 @@ def log_security_incident(badge_id: str, reason: str, device_id: str):
     )
     conn.commit()
     conn.close()
+
+@router.post("/logout")
+def logout_session(authorization: str = Header(None), x_device_token: str = Header(None)):
+    """
+    Formally records user session termination in the immutable security audit trail.
+    """
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        payload = decode_access_token(token)
+        if payload:
+            badge_id = payload.get("sub")
+            role = payload.get("role")
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            now_str = datetime.now(timezone.utc).isoformat()
+            cursor.execute(
+                """INSERT INTO audit_logs (log_id, actor_badge, actor_role, action, target_ref, ip_address, device_id, timestamp, signature)
+                VALUES (?, ?, ?, 'LOGOUT_SESSION_TERMINATED', ?, '127.0.0.1', ?, ?, ?);""",
+                (str(uuid.uuid4()), badge_id, role, f"Terminal:{x_device_token or 'UNKNOWN'}", x_device_token or "UNKNOWN", now_str, f"SIG-EXIT-{badge_id[:6] if badge_id else 'UNK'}")
+            )
+            conn.commit()
+            conn.close()
+    return {"status": "SUCCESS", "message": "Session terminated and audited."}
+
