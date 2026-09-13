@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { Camera, CheckCircle2, XCircle, ShieldCheck, RefreshCw, Upload, Image as ImageIcon } from "lucide-react";
+import { Camera, CheckCircle2, XCircle, ShieldCheck, RefreshCw } from "lucide-react";
 import { api, API_BASE } from "../services/api";
 
 interface FaceAuthModalProps {
@@ -21,9 +21,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
   onCancel,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [cameraError, setCameraError] = useState(false);
-  const [customSnapshotB64, setCustomSnapshotB64] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<{
     success: boolean;
@@ -31,7 +29,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
     reason?: string;
   } | null>(null);
 
-  // Start webcam
+  // Initialize live optical webcam stream
   useEffect(() => {
     let localStream: MediaStream | null = null;
     const startCamera = async () => {
@@ -57,9 +55,8 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
     };
   }, []);
 
-  // Frame capture logic from live video stream
+  // Frame capture logic directly from live webcam stream
   const captureFrameFromVideo = (): string | null => {
-    if (customSnapshotB64) return customSnapshotB64;
     if (!videoRef.current || videoRef.current.videoWidth === 0) return null;
     try {
       const canvas = document.createElement("canvas");
@@ -75,17 +72,6 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
     }
   };
 
-  const handleSnapshotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setCustomSnapshotB64(reader.result as string);
-      setVerificationResult(null);
-    };
-    reader.readAsDataURL(file);
-  };
-
   const handleLiveVerification = async () => {
     setIsVerifying(true);
     setVerificationResult(null);
@@ -96,13 +82,13 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
         setVerificationResult({
           success: false,
           confidence: 0,
-          reason: "Live camera capture unavailable. Please ensure camera access is enabled or upload a live verification portrait.",
+          reason: "Live camera stream unavailable. Please ensure webcam permission is granted.",
         });
         setIsVerifying(false);
         return;
       }
 
-      // Real optical biometric transmission to backend comparison engine
+      // Transmit live frame to real optical biometric comparison engine
       const res = await api.loginStep2Face({
         temp_token: tempToken,
         live_photo_b64: capturedFrame,
@@ -148,7 +134,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
                 Stage 2: Mandatory 2FA Face Biometrics
               </h3>
               <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                Active Liveness &amp; Real Optical Biometric Verification
+                Live Facial Verification Against Enrolled Departmental Record
               </p>
             </div>
           </div>
@@ -160,33 +146,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 140px", gap: "16px", marginBottom: "16px" }}>
             {/* Live Camera Scanner */}
             <div className="scanner-container">
-              {customSnapshotB64 ? (
-                <div style={{ width: "100%", height: "100%", position: "relative" }}>
-                  <img
-                    src={customSnapshotB64}
-                    alt="Live Snapshot"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setCustomSnapshotB64(null)}
-                    style={{
-                      position: "absolute",
-                      top: "8px",
-                      right: "8px",
-                      background: "rgba(2, 6, 23, 0.8)",
-                      border: "1px solid var(--border-subtle)",
-                      color: "#94a3b8",
-                      fontSize: "0.7rem",
-                      padding: "4px 8px",
-                      borderRadius: "4px",
-                      cursor: "pointer"
-                    }}
-                  >
-                    Switch to Live Camera
-                  </button>
-                </div>
-              ) : !cameraError ? (
+              {!cameraError ? (
                 <video
                   ref={videoRef}
                   autoPlay
@@ -205,22 +165,14 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
                   textAlign: "center"
                 }}>
                   <Camera size={36} color="#64748b" style={{ marginBottom: "8px" }} />
-                  <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginBottom: "12px" }}>
-                    Camera hardware not detected or permission denied.
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                    Camera access required. Please allow camera permissions in your browser.
                   </p>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ fontSize: "0.75rem", padding: "6px 12px" }}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload size={14} /> Upload Verification Snapshot
-                  </button>
                 </div>
               )}
 
               {/* Reticle Overlay */}
-              {!customSnapshotB64 && !cameraError && (
+              {!cameraError && (
                 <div className="scanner-overlay">
                   <div className="scanner-reticle">
                     <div className="scanline"></div>
@@ -244,9 +196,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
                 color: "#94a3b8"
               }}>
                 <span>Optical Match Engine: <strong style={{ color: "#38bdf8" }}>Active</strong></span>
-                <span className="mono" style={{ color: "#10b981" }}>
-                  {customSnapshotB64 ? "SNAPSHOT LOADED" : "FEED LIVE 30FPS"}
-                </span>
+                <span className="mono" style={{ color: "#10b981" }}>FEED LIVE 30FPS</span>
               </div>
             </div>
 
@@ -288,37 +238,6 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
               <div className="mono" style={{ fontSize: "0.68rem", color: "#38bdf8" }}>
                 {badgeId}
               </div>
-
-              {/* Optional Snapshot Upload Button */}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  marginTop: "8px",
-                  background: "transparent",
-                  border: "1px dashed var(--border-subtle)",
-                  color: "#94a3b8",
-                  fontSize: "0.68rem",
-                  padding: "4px 6px",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "4px"
-                }}
-                title="Select a photo snapshot for optical verification"
-              >
-                <ImageIcon size={12} /> Snapshot File
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                style={{ display: "none" }}
-                accept="image/*"
-                onChange={handleSnapshotUpload}
-              />
             </div>
           </div>
 
@@ -345,7 +264,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
                 </div>
                 <div style={{ fontSize: "0.76rem", color: "var(--text-secondary)" }}>
                   {verificationResult.success
-                    ? "Real optical feature vectors verified against enrolled departmental record. Initializing secure terminal session..."
+                    ? "Live facial vectors verified against enrolled departmental record. Initializing secure terminal session..."
                     : verificationResult.reason}
                 </div>
               </div>

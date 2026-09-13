@@ -255,12 +255,12 @@ export const App: React.FC = () => {
 
               <form onSubmit={handleLoginSubmit}>
                 <div style={{ marginBottom: "16px" }}>
-                  <label className="gov-label">Departmental / Badge ID</label>
+                  <label className="gov-label">Assigned Username / Departmental ID</label>
                   <div style={{ position: "relative" }}>
                     <input
                       type="text"
                       className="gov-input mono"
-                      placeholder="Enter Departmental ID (e.g. ADM-IT-SURAKH)"
+                      placeholder="Write your assigned username"
                       value={badgeId}
                       onChange={(e) => setBadgeId(e.target.value)}
                       required
@@ -269,12 +269,12 @@ export const App: React.FC = () => {
                 </div>
 
                 <div style={{ marginBottom: "20px" }}>
-                  <label className="gov-label">Authorized Password</label>
+                  <label className="gov-label">Assigned Password</label>
                   <div style={{ position: "relative" }}>
                     <input
                       type="password"
                       className="gov-input"
-                      placeholder="Enter master password"
+                      placeholder="Fill your assigned password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
