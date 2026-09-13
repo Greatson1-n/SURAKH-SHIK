@@ -206,6 +206,22 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleReinstateUser = async (u: any) => {
+    if (!confirm(`Restore full access for officer '${u.full_name}' (${u.badge_id})? This will unfreeze their credentials and allow them to log in.`)) {
+      return;
+    }
+    try {
+      const res = await api.reinstateUser({
+        badge_id: u.badge_id,
+        reason: "Access clearance granted and reinstated by IT Administration"
+      });
+      alert(res.message);
+      loadData();
+    } catch (err: any) {
+      alert(err.message || "Failed to reinstate user.");
+    }
+  };
+
   const fetchHealth = async () => {
     setHealthLoading(true);
     try {
@@ -674,22 +690,74 @@ export const AdminDashboard: React.FC = () => {
 
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
                     <span className={`gov-badge ${u.is_active === 1 ? "badge-green" : "badge-red"}`} style={{ fontSize: "0.68rem" }}>
-                      {u.is_active === 1 ? "2FA ACTIVE" : "REVOKED / SUSPENDED"}
+                      {u.is_active === 1 ? "ACTIVE (2FA)" : "SUSPENDED / LOCKED"}
                     </span>
                     {u.badge_id !== "ADM-IT-SURAKH" && (
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: "4px 8px", fontSize: "0.72rem", color: "#fca5a5", borderColor: "rgba(239, 68, 68, 0.4)" }}
-                        onClick={() => {
-                          setTerminatingUser(u);
-                          setIsPermanentDelete(false);
-                          setTerminationReason("Illegal system access / Violation of Section 66 IT Act");
-                        }}
-                        title="Revoke clearance or delete account under illegal misuse / security condition"
-                      >
-                        <UserX size={12} />
-                        Revoke / Delete
-                      </button>
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {u.is_active === 0 ? (
+                          <button
+                            className="btn btn-primary"
+                            style={{ 
+                              padding: "4px 10px", 
+                              fontSize: "0.72rem", 
+                              background: "#059669", 
+                              borderColor: "#10b981", 
+                              color: "#ecfdf5",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px"
+                            }}
+                            onClick={() => handleReinstateUser(u)}
+                            title="Restore access for this suspended account"
+                          >
+                            <CheckCircle2 size={12} />
+                            Grant Re-Access
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-secondary"
+                            style={{ 
+                              padding: "4px 8px", 
+                              fontSize: "0.72rem", 
+                              color: "#fde68a", 
+                              borderColor: "rgba(245, 158, 11, 0.4)",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px"
+                            }}
+                            onClick={() => {
+                              setTerminatingUser(u);
+                              setIsPermanentDelete(false);
+                              setTerminationReason("Temporary disciplinary suspension / Under review");
+                            }}
+                            title="Temporarily freeze access for this officer"
+                          >
+                            <AlertTriangle size={12} />
+                            Suspend
+                          </button>
+                        )}
+                        <button
+                          className="btn btn-secondary"
+                          style={{ 
+                            padding: "4px 8px", 
+                            fontSize: "0.72rem", 
+                            color: "#fca5a5", 
+                            borderColor: "rgba(239, 68, 68, 0.4)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px"
+                          }}
+                          onClick={() => {
+                            setTerminatingUser(u);
+                            setIsPermanentDelete(true);
+                            setTerminationReason("Permanent departure / Record expunged");
+                          }}
+                          title="Permanently delete this user from database and registry"
+                        >
+                          <UserX size={12} />
+                          Delete
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1257,12 +1325,12 @@ export const AdminDashboard: React.FC = () => {
       {/* USER TERMINATION / REVOCATION MODAL */}
       {terminatingUser && (
         <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: "540px", borderTop: "4px solid #ef4444" }}>
+          <div className="modal-content" style={{ maxWidth: "540px", borderTop: isPermanentDelete ? "4px solid #ef4444" : "4px solid #f59e0b" }}>
             <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border-subtle)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <AlertTriangle size={22} color="#ef4444" />
-                <h3 style={{ fontSize: "1.15rem", color: "#f87171" }}>
-                  Revoke / Terminate User Clearance
+                {isPermanentDelete ? <UserX size={22} color="#ef4444" /> : <AlertTriangle size={22} color="#f59e0b" />}
+                <h3 style={{ fontSize: "1.15rem", color: isPermanentDelete ? "#f87171" : "#fde68a" }}>
+                  {isPermanentDelete ? "Permanently Expunge Officer Account" : "Suspend Officer Access (Temporary Lockout)"}
                 </h3>
               </div>
               <button className="btn btn-secondary" style={{ padding: "4px 8px" }} onClick={() => setTerminatingUser(null)}>
@@ -1271,12 +1339,22 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <form onSubmit={handleTerminateUser} style={{ padding: "20px 24px" }}>
-              <div className="gov-card" style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.25)", marginBottom: "16px", padding: "12px" }}>
+              <div className="gov-card" style={{ 
+                background: isPermanentDelete ? "rgba(239, 68, 68, 0.12)" : "rgba(245, 158, 11, 0.12)", 
+                border: `1px solid ${isPermanentDelete ? "rgba(239, 68, 68, 0.4)" : "rgba(245, 158, 11, 0.4)"}`, 
+                marginBottom: "16px", 
+                padding: "12px" 
+              }}>
                 <p style={{ fontSize: "0.85rem", color: "#e2e8f0" }}>
-                  You are taking administrative action against:
-                  <br />
-                  <strong>{terminatingUser.full_name}</strong> (<span className="mono" style={{ color: "#38bdf8" }}>{terminatingUser.badge_id}</span>) &bull; {terminatingUser.role}
+                  Target Account: <strong>{terminatingUser.full_name}</strong> (<span className="mono" style={{ color: "#38bdf8" }}>{terminatingUser.badge_id}</span>) &bull; {terminatingUser.role}
                 </p>
+                <div style={{ fontSize: "0.78rem", marginTop: "6px", color: isPermanentDelete ? "#fca5a5" : "#fef08a" }}>
+                  {isPermanentDelete ? (
+                    <span>⚠️ <strong>PERMANENT DELETION:</strong> This account will be completely expunged from the database, the persistent JSON registry, and photo storage. It will never show up again.</span>
+                  ) : (
+                    <span>🔒 <strong>TEMPORARY SUSPENSION:</strong> This account will be locked out from logging in. You can restore access at any time by clicking <strong>'Grant Re-Access'</strong> in the user list.</span>
+                  )}
+                </div>
               </div>
 
               <div style={{ marginBottom: "16px" }}>
@@ -1287,20 +1365,23 @@ export const AdminDashboard: React.FC = () => {
                   onChange={(e) => setTerminationReason(e.target.value)}
                   style={{ marginBottom: "8px" }}
                 >
-                  <option value="Illegal system access / Violation of Section 66 IT Act">
-                    Illegal system access / Violation of Section 66 IT Act
-                  </option>
-                  <option value="Unauthorized evidence extraction / Attempted data leak">
-                    Unauthorized evidence extraction / Attempted data leak
+                  <option value="Temporary disciplinary suspension / Under review">
+                    Temporary disciplinary suspension / Under review
                   </option>
                   <option value="Compromised credentials / Suspected security breach">
                     Compromised credentials / Suspected security breach
                   </option>
-                  <option value="Disciplinary suspension by Departmental Vigilance Cell">
-                    Disciplinary suspension by Departmental Vigilance Cell
+                  <option value="Unauthorized evidence extraction / Attempted data leak">
+                    Unauthorized evidence extraction / Attempted data leak
+                  </option>
+                  <option value="Illegal system access / Violation of Section 66 IT Act">
+                    Illegal system access / Violation of Section 66 IT Act
                   </option>
                   <option value="Officer transferred / Departed jurisdiction">
                     Officer transferred / Departed jurisdiction
+                  </option>
+                  <option value="Permanent departure / Record expunged">
+                    Permanent departure / Record expunged
                   </option>
                 </select>
                 <input
@@ -1323,7 +1404,7 @@ export const AdminDashboard: React.FC = () => {
                       checked={!isPermanentDelete}
                       onChange={() => setIsPermanentDelete(false)}
                     />
-                    <span><strong>Suspend &amp; Revoke Access</strong> (Recommended - Preserves audit history)</span>
+                    <span><strong>Temporary Suspension</strong> (Can be reinstated with 'Grant Re-Access')</span>
                   </label>
                 </div>
                 <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
@@ -1334,7 +1415,7 @@ export const AdminDashboard: React.FC = () => {
                       checked={isPermanentDelete}
                       onChange={() => setIsPermanentDelete(true)}
                     />
-                    <span><strong>Permanently Delete Record</strong> (Expunges user account)</span>
+                    <span><strong>Permanent Deletion</strong> (Completely deletes from database &amp; registry)</span>
                   </label>
                 </div>
               </div>
@@ -1343,9 +1424,14 @@ export const AdminDashboard: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setTerminatingUser(null)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-danger" disabled={terminatingLoading}>
-                  {terminatingLoading ? <RefreshCw className="animate-spin" size={16} /> : <UserX size={16} />}
-                  Enforce Termination
+                <button 
+                  type="submit" 
+                  className={isPermanentDelete ? "btn btn-danger" : "btn btn-secondary"} 
+                  style={!isPermanentDelete ? { background: "rgba(245, 158, 11, 0.2)", borderColor: "#f59e0b", color: "#fde68a" } : {}}
+                  disabled={terminatingLoading}
+                >
+                  {terminatingLoading ? <RefreshCw className="animate-spin" size={16} /> : (isPermanentDelete ? <UserX size={16} /> : <AlertTriangle size={16} />)}
+                  {isPermanentDelete ? "Permanently Delete Record" : "Enforce Suspension"}
                 </button>
               </div>
             </form>

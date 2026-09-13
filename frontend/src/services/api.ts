@@ -159,6 +159,19 @@ export const api = {
     return res.json();
   },
 
+  reinstateUser: async (payload: { badge_id: string; reason?: string }) => {
+    const res = await fetch(`${API_BASE}/api/admin/users/reinstate`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "User reinstatement failed.");
+    }
+    return res.json();
+  },
+
   getDevices: async () => {
     const res = await fetch(`${API_BASE}/api/admin/devices`, { headers: getHeaders() });
     return res.json();

@@ -166,6 +166,16 @@ def terminate_user(
     action_name = "USER_PERMANENTLY_DELETED" if payload.permanent_delete else "USER_REVOKED_ILLEGAL_USE"
 
     if payload.permanent_delete:
+        cursor.execute("SELECT photo_path FROM users WHERE badge_id = ?;", (payload.badge_id,))
+        p_row = cursor.fetchone()
+        if p_row and p_row["photo_path"]:
+            p_file = PHOTOS_DIR / p_row["photo_path"]
+            if p_file.exists() and p_row["photo_path"] != "admin_photo.jpg":
+                try:
+                    p_file.unlink()
+                except Exception:
+                    pass
+
         cursor.execute("DELETE FROM users WHERE badge_id = ?;", (payload.badge_id,))
         reg = load_persistent_registry()
         if payload.badge_id in reg:
@@ -185,11 +195,52 @@ def terminate_user(
     conn.commit()
     conn.close()
 
-    status_str = "permanently deleted" if payload.permanent_delete else "suspended & revoked"
+    status_str = "permanently deleted from database and registry" if payload.permanent_delete else "suspended / locked out"
     return {
         "status": "SUCCESS",
         "message": f"User '{target_user['full_name']}' ({payload.badge_id}) has been {status_str}.",
         "reason": payload.reason
+    }
+
+class ReinstateUserRequest(BaseModel):
+    badge_id: str
+    reason: Optional[str] = "Re-access clearance approved by IT Administration"
+
+@router.post("/users/reinstate")
+def reinstate_user(
+    payload: ReinstateUserRequest, 
+    admin: dict = Depends(require_admin), 
+    device_token: str = Depends(verify_departmental_device)
+):
+    """
+    Restores / reinstates a suspended user account, granting back access.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT full_name, role FROM users WHERE badge_id = ?;", (payload.badge_id,))
+    target_user = cursor.fetchone()
+    if not target_user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    now_str = datetime.now(timezone.utc).isoformat()
+    cursor.execute("UPDATE users SET is_active = 1 WHERE badge_id = ?;", (payload.badge_id,))
+    update_user_in_registry(payload.badge_id, {"is_active": 1})
+
+    cursor.execute(
+        """INSERT INTO audit_logs (log_id, actor_badge, actor_role, action, target_ref, ip_address, device_id, timestamp, signature)
+        VALUES (?, ?, 'SYSTEM_ADMIN', 'USER_REINSTATED_REACCESS', ?, '127.0.0.1', ?, ?, 'SIG-REACCESS');""",
+        (str(uuid.uuid4()), admin["sub"], f"User:{payload.badge_id} Reason:{payload.reason}", device_token, now_str)
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Re-Access Granted: Account '{target_user['full_name']}' ({payload.badge_id}) has been restored to ACTIVE status.",
+        "badge_id": payload.badge_id
     }
 
 @router.get("/devices")
