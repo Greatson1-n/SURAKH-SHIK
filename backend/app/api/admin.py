@@ -10,7 +10,13 @@ from pydantic import BaseModel
 from app.core.config import PHOTOS_DIR, VAULT_DIR, DB_PATH
 from app.core.security import hash_password, decode_access_token, decrypt_bytes, compute_sha256
 from app.core.device import verify_departmental_device
-from app.models.database import get_db_connection
+from app.models.database import (
+    get_db_connection, 
+    save_user_to_registry, 
+    update_user_in_registry, 
+    load_persistent_registry, 
+    save_persistent_registry
+)
 from app.ledger.blockchain import SovereignConsortiumLedger
 
 router = APIRouter(prefix="/api/admin", tags=["IT Administration"])
@@ -67,23 +73,41 @@ async def create_user(
         conn.close()
         raise HTTPException(status_code=400, detail="Badge / Departmental ID already exists.")
 
-    # Save official photo
+    # Save official photo and encode to Base64 for lifetime preservation
     file_ext = Path(photo.filename).suffix or ".jpg"
     photo_filename = f"{badge_id}_{uuid.uuid4().hex[:8]}{file_ext}"
     target_photo_path = PHOTOS_DIR / photo_filename
 
-    with open(target_photo_path, "wb") as buffer:
-        shutil.copyfileobj(photo.file, buffer)
+    photo_bytes = await photo.read()
+    photo_b64 = base64.b64encode(photo_bytes).decode("utf-8")
+    target_photo_path.write_bytes(photo_bytes)
 
     now_str = datetime.now(timezone.utc).isoformat()
     hashed_pw = hash_password(password)
 
     cursor.execute(
         """INSERT INTO users 
-        (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?);""",
-        (badge_id, full_name, hashed_pw, role, branch, state, district, station_id, photo_filename, now_str)
+        (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, is_active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?);""",
+        (badge_id, full_name, hashed_pw, role, branch, state, district, station_id, photo_filename, photo_b64, now_str)
     )
+
+    # Sync to persistent registry for permanent lifetime storage across container restarts
+    save_user_to_registry({
+        "badge_id": badge_id,
+        "full_name": full_name,
+        "password_hash": hashed_pw,
+        "role": role,
+        "branch": branch,
+        "state": state,
+        "district": district,
+        "station_id": station_id,
+        "photo_path": photo_filename,
+        "photo_b64": photo_b64,
+        "device_token": device_token,
+        "is_active": 1,
+        "created_at": now_str
+    })
 
     # Log action to audit trail
     cursor.execute(
@@ -136,8 +160,13 @@ def terminate_user(
 
     if payload.permanent_delete:
         cursor.execute("DELETE FROM users WHERE badge_id = ?;", (payload.badge_id,))
+        reg = load_persistent_registry()
+        if payload.badge_id in reg:
+            del reg[payload.badge_id]
+            save_persistent_registry(reg)
     else:
         cursor.execute("UPDATE users SET is_active = 0 WHERE badge_id = ?;", (payload.badge_id,))
+        update_user_in_registry(payload.badge_id, {"is_active": 0})
 
     # Log to immutable audit logs
     cursor.execute(

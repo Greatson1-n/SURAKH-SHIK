@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Lock, Camera, AlertTriangle, RefreshCw } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Lock, Camera, AlertTriangle, RefreshCw, Clock } from "lucide-react";
 import { api, getDeviceToken, getAuthToken, setAuthToken, clearAuthToken } from "./services/api";
 import { Header } from "./components/Header";
 import { DeviceGateModal } from "./components/DeviceGateModal";
@@ -8,17 +8,25 @@ import { AdminDashboard } from "./pages/AdminDashboard";
 import { OfficerDashboard } from "./pages/OfficerDashboard";
 import { ForensicAndJudicialDashboard } from "./pages/ForensicAndJudicialDashboard";
 
+const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const WARNING_BEFORE_TIMEOUT_MS = 60 * 1000;   // 60 seconds warning (at 14 mins)
+
 export const App: React.FC = () => {
   const [deviceToken, setDeviceTokenState] = useState<string>(getDeviceToken());
   const [isDeviceAuthorized, setIsDeviceAuthorized] = useState<boolean>(true);
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Login Form States
-  const [badgeId, setBadgeId] = useState("ADM-IT-SURAKH");
-  const [password, setPassword] = useState("A0M-1T-SRKSK");
+  // Login Form States (Blank by default for zero-trust security)
+  const [badgeId, setBadgeId] = useState("");
+  const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginLoading, setLoginLoading] = useState<boolean>(false);
+
+  // Inactivity Auto-Logout States
+  const [inactivityNotice, setInactivityNotice] = useState<string | null>(null);
+  const [warningSeconds, setWarningSeconds] = useState<number | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
 
   // 2FA Face Biometrics State
   const [face2faData, setFace2faData] = useState<{
@@ -59,6 +67,54 @@ export const App: React.FC = () => {
     checkInitialState();
   }, [deviceToken]);
 
+  // 15-Minute Inactivity Session Watchdog
+  const resetActivityTimer = () => {
+    lastActivityRef.current = Date.now();
+    if (warningSeconds !== null) {
+      setWarningSeconds(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return;
+
+    lastActivityRef.current = Date.now();
+
+    const activityEvents = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    const onUserInteraction = () => resetActivityTimer();
+
+    activityEvents.forEach((ev) => window.addEventListener(ev, onUserInteraction, { passive: true }));
+
+    const timerInterval = setInterval(() => {
+      const elapsed = Date.now() - lastActivityRef.current;
+
+      if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+        // Force Auto-Logout
+        clearInterval(timerInterval);
+        setWarningSeconds(null);
+        api.logoutSession();
+        clearAuthToken();
+        setUser(null);
+        setInactivityNotice(
+          "SESSION EXPIRED: You were automatically logged out due to 15 minutes of inactivity in compliance with National Cyber Security Standards (RAM keys zeroized)."
+        );
+      } else if (elapsed >= (INACTIVITY_TIMEOUT_MS - WARNING_BEFORE_TIMEOUT_MS)) {
+        // Show 60-second warning modal
+        const secondsRemaining = Math.max(0, Math.ceil((INACTIVITY_TIMEOUT_MS - elapsed) / 1000));
+        setWarningSeconds(secondsRemaining);
+      } else {
+        if (warningSeconds !== null) {
+          setWarningSeconds(null);
+        }
+      }
+    }, 1000);
+
+    return () => {
+      activityEvents.forEach((ev) => window.removeEventListener(ev, onUserInteraction));
+      clearInterval(timerInterval);
+    };
+  }, [user, warningSeconds]);
+
   const handleDeviceUpdated = (newToken: string) => {
     setDeviceTokenState(newToken);
   };
@@ -68,6 +124,7 @@ export const App: React.FC = () => {
     e.preventDefault();
     setLoginLoading(true);
     setLoginError(null);
+    setInactivityNotice(null);
 
     try {
       const res = await api.loginStep1(badgeId, password);
@@ -92,6 +149,7 @@ export const App: React.FC = () => {
     setAuthToken(authData.access_token);
     setUser(authData.user);
     setFace2faData(null);
+    lastActivityRef.current = Date.now();
   };
 
   const handleLogout = () => {
@@ -158,6 +216,25 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
+              {/* Inactivity Notice Banner */}
+              {inactivityNotice && (
+                <div style={{
+                  padding: "12px 16px",
+                  borderRadius: "var(--radius-md)",
+                  marginBottom: "16px",
+                  background: "rgba(245, 158, 11, 0.15)",
+                  border: "1px solid rgba(245, 158, 11, 0.4)",
+                  color: "#fde68a",
+                  fontSize: "0.82rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px"
+                }}>
+                  <AlertTriangle size={18} color="#f59e0b" style={{ flexShrink: 0 }} />
+                  <span>{inactivityNotice}</span>
+                </div>
+              )}
+
               {loginError && (
                 <div style={{
                   padding: "10px 14px",
@@ -183,7 +260,7 @@ export const App: React.FC = () => {
                     <input
                       type="text"
                       className="gov-input mono"
-                      placeholder="e.g. ADM-IT-SURAKH"
+                      placeholder="Enter Departmental ID (e.g. ADM-IT-SURAKH)"
                       value={badgeId}
                       onChange={(e) => setBadgeId(e.target.value)}
                       required
@@ -197,7 +274,7 @@ export const App: React.FC = () => {
                     <input
                       type="password"
                       className="gov-input"
-                      placeholder="••••••••••••"
+                      placeholder="Enter master password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
@@ -269,6 +346,34 @@ export const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* 60-Second Inactivity Warning Modal */}
+      {warningSeconds !== null && (
+        <div className="modal-backdrop" style={{ zIndex: 99999 }}>
+          <div className="modal-content" style={{ maxWidth: "440px", textAlign: "center", borderTop: "4px solid #f59e0b" }}>
+            <div style={{ padding: "28px 24px" }}>
+              <Clock size={48} color="#f59e0b" style={{ margin: "0 auto 12px", display: "block" }} />
+              <h3 style={{ fontSize: "1.2rem", color: "#f8fafc", fontWeight: 700, marginBottom: "8px" }}>
+                Inactivity Lockout Warning
+              </h3>
+              <p style={{ fontSize: "0.84rem", color: "var(--text-secondary)", marginBottom: "16px", lineHeight: 1.5 }}>
+                Your workstation has been idle. In accordance with zero-trust cyber protocols, your active session will terminate and RAM encryption keys will be zeroized in:
+              </p>
+              <div className="mono" style={{ fontSize: "2.4rem", color: "#f59e0b", fontWeight: 800, marginBottom: "24px" }}>
+                00:{warningSeconds < 10 ? `0${warningSeconds}` : warningSeconds}
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: "100%", padding: "12px", fontSize: "0.95rem" }}
+                onClick={resetActivityTimer}
+              >
+                I Am Still Working (Keep Session Active)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Device Hardware Binding Modal (Handles Unauthorized Laptop Detection & Switcher) */}
       <DeviceGateModal 

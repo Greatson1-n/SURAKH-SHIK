@@ -1,10 +1,39 @@
 import sqlite3
 import json
 import uuid
+import base64
 from datetime import datetime, timezone
 from pathlib import Path
-from app.core.config import DB_PATH, ADMIN_USER_ID, ADMIN_RAW_PASS, ADMIN_PHOTO_NAME
+from app.core.config import DB_PATH, REGISTRY_PATH, PHOTOS_DIR, ADMIN_USER_ID, ADMIN_RAW_PASS, ADMIN_PHOTO_NAME
 from app.core.security import hash_password, compute_sha256
+
+def load_persistent_registry() -> dict:
+    if not REGISTRY_PATH.exists():
+        return {}
+    try:
+        with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[WARN] Failed to read persistent registry: {e}")
+        return {}
+
+def save_persistent_registry(registry: dict):
+    try:
+        with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
+            json.dump(registry, f, indent=2)
+    except Exception as e:
+        print(f"[WARN] Failed to write persistent registry: {e}")
+
+def save_user_to_registry(user_dict: dict):
+    reg = load_persistent_registry()
+    reg[user_dict["badge_id"]] = user_dict
+    save_persistent_registry(reg)
+
+def update_user_in_registry(badge_id: str, updates: dict):
+    reg = load_persistent_registry()
+    if badge_id in reg:
+        reg[badge_id].update(updates)
+        save_persistent_registry(reg)
 
 def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -30,11 +59,18 @@ def init_db():
         district TEXT NOT NULL,
         station_id TEXT NOT NULL,
         photo_path TEXT NOT NULL,
+        photo_b64 TEXT,
         device_token TEXT,
         is_active INTEGER DEFAULT 1,
         created_at TEXT NOT NULL
     );
     """)
+
+    # Safe migration: ensure photo_b64 exists if table was pre-existing
+    cursor.execute("PRAGMA table_info(users);")
+    cols = [r["name"] for r in cursor.fetchall()]
+    if "photo_b64" not in cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN photo_b64 TEXT;")
 
     # 2. Authorized Departmental Devices (Hardware Binding)
     cursor.execute("""
@@ -216,14 +252,22 @@ def seed_initial_data(conn: sqlite3.Connection):
         )
 
     # Check and Seed ONLY the Master Admin User
+    admin_photo_b64 = None
+    admin_p_path = PHOTOS_DIR / ADMIN_PHOTO_NAME
+    if admin_p_path.exists():
+        try:
+            admin_photo_b64 = base64.b64encode(admin_p_path.read_bytes()).decode("utf-8")
+        except Exception:
+            pass
+
     cursor.execute("SELECT COUNT(*) FROM users WHERE badge_id = ?;", (ADMIN_USER_ID,))
     if cursor.fetchone()[0] == 0:
         now_str = datetime.now(timezone.utc).isoformat()
         hashed_pw = hash_password(ADMIN_RAW_PASS)
         cursor.execute(
             """INSERT INTO users 
-            (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, device_token, is_active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+            (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, device_token, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
             (
                 ADMIN_USER_ID,
                 "Chief IT Administrator (NCRB)",
@@ -234,11 +278,48 @@ def seed_initial_data(conn: sqlite3.Connection):
                 "NCRB HQ",
                 "MHA-HQ",
                 ADMIN_PHOTO_NAME,
+                admin_photo_b64,
                 "MHA-SECURE-STATION-DEV-001",
                 1,
                 now_str
             )
         )
+    elif admin_photo_b64:
+        cursor.execute("UPDATE users SET photo_b64 = ? WHERE badge_id = ? AND (photo_b64 IS NULL OR photo_b64 = '');", (admin_photo_b64, ADMIN_USER_ID))
+
+    # Lifetime Persistence: Restore any users previously enrolled in persistent registry
+    registry = load_persistent_registry()
+    for b_id, u in registry.items():
+        cursor.execute("SELECT id FROM users WHERE badge_id = ?;", (b_id,))
+        if not cursor.fetchone():
+            cursor.execute(
+                """INSERT INTO users 
+                (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, device_token, is_active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                (
+                    u.get("badge_id"),
+                    u.get("full_name"),
+                    u.get("password_hash"),
+                    u.get("role"),
+                    u.get("branch"),
+                    u.get("state"),
+                    u.get("district"),
+                    u.get("station_id"),
+                    u.get("photo_path"),
+                    u.get("photo_b64"),
+                    u.get("device_token", "MHA-SECURE-STATION-DEV-001"),
+                    u.get("is_active", 1),
+                    u.get("created_at")
+                )
+            )
+            # Reconstruct photo file on disk if missing (e.g. fresh ephemeral container)
+            if u.get("photo_b64") and u.get("photo_path"):
+                target_p = PHOTOS_DIR / u.get("photo_path")
+                if not target_p.exists():
+                    try:
+                        target_p.write_bytes(base64.b64decode(u["photo_b64"]))
+                    except Exception:
+                        pass
 
     # Genesis Block for Consortium Ledger if empty
     cursor.execute("SELECT COUNT(*) FROM ledger_blocks;")

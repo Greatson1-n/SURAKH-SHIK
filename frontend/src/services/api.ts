@@ -72,7 +72,12 @@ export const api = {
     return res.json();
   },
 
-  loginStep2Face: async (payload: { temp_token: string; face_match_confidence: number; liveness_verified: boolean }) => {
+  loginStep2Face: async (payload: {
+    temp_token: string;
+    live_photo_b64?: string;
+    face_match_confidence?: number;
+    liveness_verified?: boolean;
+  }) => {
     const res = await fetch(`${API_BASE}/api/auth/login-step2-face`, {
       method: "POST",
       headers: getHeaders(),

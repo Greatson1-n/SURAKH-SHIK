@@ -6,6 +6,7 @@ DATA_DIR = BASE_DIR / "data"
 VAULT_DIR = DATA_DIR / "vault"
 PHOTOS_DIR = DATA_DIR / "photos"
 DB_PATH = DATA_DIR / "surakh_shik.db"
+REGISTRY_PATH = DATA_DIR / "surakh_persistent_registry.json"
 
 # Security Settings
 JWT_SECRET = os.getenv("SURAKH_JWT_SECRET", "SURAKH-SHIK-MHA-NCRB-SOVEREIGN-KEY-2026-X99Q")
