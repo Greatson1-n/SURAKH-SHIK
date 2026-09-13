@@ -56,13 +56,14 @@ async def create_user(
     state: str = Form(...),
     district: str = Form(...),
     station_id: str = Form(...),
-    photo: UploadFile = File(...),
+    photo: Optional[UploadFile] = File(None),
     admin: dict = Depends(require_admin),
     device_token: str = Depends(verify_departmental_device)
 ):
     """
-    Admin onboards a verified departmental user (IO, SHO, Forensic Analyst, Judge, Prosecutor)
-    with their official photo for 2FA Face Biometrics.
+    Admin onboards a verified departmental user (IO, SHO, Forensic Analyst, Judge, Prosecutor).
+    Official photo is optional: if provided, it is stored for Face 2FA;
+    if omitted, the officer completes 1-click live webcam enrollment (TOFU) on first login.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -73,23 +74,28 @@ async def create_user(
         conn.close()
         raise HTTPException(status_code=400, detail="Badge / Departmental ID already exists.")
 
-    # Save official photo and encode to Base64 for lifetime preservation
-    file_ext = Path(photo.filename).suffix or ".jpg"
-    photo_filename = f"{badge_id}_{uuid.uuid4().hex[:8]}{file_ext}"
-    target_photo_path = PHOTOS_DIR / photo_filename
+    photo_filename = ""
+    photo_b64 = ""
+    is_biometric_enrolled = 0
 
-    photo_bytes = await photo.read()
-    photo_b64 = base64.b64encode(photo_bytes).decode("utf-8")
-    target_photo_path.write_bytes(photo_bytes)
+    if photo and photo.filename:
+        file_ext = Path(photo.filename).suffix or ".jpg"
+        photo_filename = f"{badge_id}_{uuid.uuid4().hex[:8]}{file_ext}"
+        target_photo_path = PHOTOS_DIR / photo_filename
+
+        photo_bytes = await photo.read()
+        photo_b64 = base64.b64encode(photo_bytes).decode("utf-8")
+        target_photo_path.write_bytes(photo_bytes)
+        is_biometric_enrolled = 1
 
     now_str = datetime.now(timezone.utc).isoformat()
     hashed_pw = hash_password(password)
 
     cursor.execute(
         """INSERT INTO users 
-        (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?);""",
-        (badge_id, full_name, hashed_pw, role, branch, state, district, station_id, photo_filename, photo_b64, now_str)
+        (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, is_biometric_enrolled, is_active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?);""",
+        (badge_id, full_name, hashed_pw, role, branch, state, district, station_id, photo_filename, photo_b64, is_biometric_enrolled, now_str)
     )
 
     # Sync to persistent registry for permanent lifetime storage across container restarts
@@ -105,6 +111,7 @@ async def create_user(
         "photo_path": photo_filename,
         "photo_b64": photo_b64,
         "device_token": device_token,
+        "is_biometric_enrolled": is_biometric_enrolled,
         "is_active": 1,
         "created_at": now_str
     })

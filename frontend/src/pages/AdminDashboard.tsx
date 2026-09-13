@@ -1,10 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { 
   Users, UserPlus, Laptop, ShieldAlert, History, RefreshCw, Layers, UserX, AlertTriangle, 
-  Activity, ShieldCheck, Search, HardDrive, Cpu, CheckCircle2, XCircle, AlertCircle 
+  Activity, ShieldCheck, Search, HardDrive, Cpu, CheckCircle2, XCircle, AlertCircle,
+  MapPin, Building2, Award, KeyRound, Camera, Sparkles
 } from "lucide-react";
 import { api, API_BASE } from "../services/api";
 import { BlockExplorer } from "../components/BlockExplorer";
+import { 
+  INDIA_STATES, 
+  INDIA_DISTRICTS, 
+  DEPARTMENTS, 
+  generateBadgeId, 
+  formatNameSlug 
+} from "../data/indiaLocations";
 
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"USERS" | "DEVICES" | "HEALTH" | "WATCHDOG" | "BLOCKCHAIN" | "AUDIT">("USERS");
@@ -25,16 +33,18 @@ export const AdminDashboard: React.FC = () => {
   const [hashResult, setHashResult] = useState<any | null>(null);
   const [hashSearching, setHashSearching] = useState(false);
 
-  // New User Form State
-  const [badgeId, setBadgeId] = useState("");
+  // Dynamic User Form State
+  const [selectedState, setSelectedState] = useState("Manipur");
+  const [selectedDistrict, setSelectedDistrict] = useState("Imphal West");
+  const [selectedDeptId, setSelectedDeptId] = useState("POLICE");
+  const [selectedRankId, setSelectedRankId] = useState("IO");
   const [fullName, setFullName] = useState("");
+  const [badgeId, setBadgeId] = useState("POL-IO-IMP");
+  const [isManualBadge, setIsManualBadge] = useState(false);
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("INVESTIGATING_OFFICER");
-  const [branch, setBranch] = useState("Local Police");
-  const [state, setState] = useState("Manipur");
-  const [district, setDistrict] = useState("Imphal West");
   const [stationId, setStationId] = useState("City Police Station");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [formMsg, setFormMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -65,10 +75,64 @@ export const AdminDashboard: React.FC = () => {
     loadData();
   }, []);
 
+  const currentDept = DEPARTMENTS.find((d) => d.id === selectedDeptId) || DEPARTMENTS[0];
+  const currentRank = currentDept.ranks.find((r) => r.id === selectedRankId) || currentDept.ranks[0];
+  const districtList = INDIA_DISTRICTS[selectedState] || [];
+  const currentDistObj = districtList.find((d) => d.name === selectedDistrict) || districtList[0] || { name: selectedDistrict, code: "IMP" };
+  const currentDistCode = currentDistObj.code;
+  const currentRole = currentRank.role;
+  const currentBranch = currentDept.name;
+
+  // Real-time Badge ID / Username Auto-generation
+  useEffect(() => {
+    if (!isManualBadge) {
+      const generated = generateBadgeId(currentDept.code, currentRank.code, currentDistCode, fullName);
+      setBadgeId(generated);
+    }
+  }, [selectedDeptId, selectedRankId, currentDistCode, fullName, isManualBadge]);
+
+  const handleStateChange = (newState: string) => {
+    setSelectedState(newState);
+    const newDistList = INDIA_DISTRICTS[newState] || [];
+    if (newDistList.length > 0) {
+      setSelectedDistrict(newDistList[0].name);
+    } else {
+      setSelectedDistrict("");
+    }
+  };
+
+  const handleDeptChange = (newDeptId: string) => {
+    setSelectedDeptId(newDeptId);
+    const dept = DEPARTMENTS.find((d) => d.id === newDeptId) || DEPARTMENTS[0];
+    if (dept.ranks.length > 0) {
+      setSelectedRankId(dept.ranks[0].id);
+    }
+  };
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] || null;
+    setPhotoFile(f);
+    if (f) {
+      const r = new FileReader();
+      r.onload = () => setPhotoPreview(r.result as string);
+      r.readAsDataURL(f);
+    } else {
+      setPhotoPreview(null);
+    }
+  };
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!photoFile) {
-      setFormMsg({ text: "Official departmental photograph is mandatory for 2FA Face Biometrics.", type: "error" });
+    if (!badgeId.trim()) {
+      setFormMsg({ text: "Badge ID / Username is required.", type: "error" });
+      return;
+    }
+    if (!fullName.trim()) {
+      setFormMsg({ text: "Official full name is required.", type: "error" });
+      return;
+    }
+    if (!password.trim()) {
+      setFormMsg({ text: "Temporary password is required.", type: "error" });
       return;
     }
 
@@ -76,24 +140,33 @@ export const AdminDashboard: React.FC = () => {
     setFormMsg(null);
     try {
       const fd = new FormData();
-      fd.append("badge_id", badgeId);
-      fd.append("full_name", fullName);
+      fd.append("badge_id", badgeId.trim());
+      fd.append("full_name", fullName.trim());
       fd.append("password", password);
-      fd.append("role", role);
-      fd.append("branch", branch);
-      fd.append("state", state);
-      fd.append("district", district);
+      fd.append("role", currentRole);
+      fd.append("branch", currentBranch);
+      fd.append("state", selectedState);
+      fd.append("district", selectedDistrict);
       fd.append("station_id", stationId);
-      fd.append("photo", photoFile);
+      if (photoFile) {
+        fd.append("photo", photoFile);
+      }
 
       await api.createUser(fd);
-      setFormMsg({ text: `Departmental user '${fullName}' (${badgeId}) successfully onboarded with Face 2FA.`, type: "success" });
+      const enrollmentNote = photoFile 
+        ? "with official photo template." 
+        : "with webcam live enrollment on first login (TOFU).";
+      setFormMsg({ 
+        text: `Departmental user '${fullName}' (${badgeId.trim()}) successfully onboarded ${enrollmentNote}`, 
+        type: "success" 
+      });
       
       // Reset form
-      setBadgeId("");
       setFullName("");
       setPassword("");
       setPhotoFile(null);
+      setPhotoPreview(null);
+      setIsManualBadge(false);
       loadData();
     } catch (err: any) {
       setFormMsg({ text: err.message || "Failed to create user.", type: "error" });
@@ -272,119 +345,277 @@ export const AdminDashboard: React.FC = () => {
             )}
 
             <form onSubmit={handleCreateUser}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label className="gov-label">Badge / Official ID</label>
-                  <input
-                    type="text"
-                    className="gov-input mono"
-                    placeholder="e.g. MN-IO-4091"
-                    value={badgeId}
-                    onChange={(e) => setBadgeId(e.target.value)}
-                    required
-                  />
+              {/* STEP 1: JURISDICTION & LOCATION */}
+              <div style={{
+                background: "rgba(15, 23, 42, 0.6)",
+                padding: "12px",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid rgba(56, 189, 248, 0.2)",
+                marginBottom: "14px"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "#38bdf8", fontSize: "0.82rem", fontWeight: 600 }}>
+                  <MapPin size={14} />
+                  <span>1. Location Jurisdiction (Mandatory)</span>
                 </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>State / Union Territory</label>
+                    <select 
+                      className="gov-select" 
+                      value={selectedState} 
+                      onChange={(e) => handleStateChange(e.target.value)}
+                      required
+                    >
+                      {INDIA_STATES.map((st) => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>
+                      District / Zone ({districtList.length} in {selectedState})
+                    </label>
+                    <select 
+                      className="gov-select" 
+                      value={selectedDistrict} 
+                      onChange={(e) => setSelectedDistrict(e.target.value)}
+                      required
+                    >
+                      {districtList.map((dst) => (
+                        <option key={dst.name} value={dst.name}>
+                          {dst.name} ({dst.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* STEP 2: DEPARTMENT & RANK */}
+              <div style={{
+                background: "rgba(15, 23, 42, 0.6)",
+                padding: "12px",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid rgba(56, 189, 248, 0.2)",
+                marginBottom: "14px"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "#38bdf8", fontSize: "0.82rem", fontWeight: 600 }}>
+                  <Building2 size={14} />
+                  <span>2. Department &amp; Rank Assignment (Mandatory)</span>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Department / Wing</label>
+                    <select 
+                      className="gov-select" 
+                      value={selectedDeptId} 
+                      onChange={(e) => handleDeptChange(e.target.value)}
+                      required
+                    >
+                      {DEPARTMENTS.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.code} - {d.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Rank / Official Designation</label>
+                    <select 
+                      className="gov-select" 
+                      value={selectedRankId} 
+                      onChange={(e) => setSelectedRankId(e.target.value)}
+                      required
+                    >
+                      {currentDept.ranks.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {currentDept.code}-{r.code}: {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* STEP 3: OFFICER NAME & SMART USERNAME GENERATION */}
+              <div style={{
+                background: "rgba(15, 23, 42, 0.6)",
+                padding: "12px",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid rgba(16, 185, 129, 0.3)",
+                marginBottom: "14px"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#10b981", fontSize: "0.82rem", fontWeight: 600 }}>
+                    <Award size={14} />
+                    <span>3. Officer Identity &amp; Sovereign Username</span>
+                  </div>
+                  {isManualBadge && (
+                    <button
+                      type="button"
+                      onClick={() => setIsManualBadge(false)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#38bdf8",
+                        fontSize: "0.7rem",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px"
+                      }}
+                    >
+                      <Sparkles size={12} />
+                      Reset to Auto
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "8px" }}>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Officer Full Name</label>
+                    <input
+                      type="text"
+                      className="gov-input"
+                      placeholder="e.g. Klinton"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>
+                      Assigned Username / Badge ID
+                    </label>
+                    <input
+                      type="text"
+                      className="gov-input mono"
+                      placeholder="e.g. POL-IO-IMP-KLNTON"
+                      value={badgeId}
+                      onChange={(e) => {
+                        setBadgeId(e.target.value);
+                        setIsManualBadge(true);
+                      }}
+                      style={{
+                        color: "#38bdf8",
+                        fontWeight: 700,
+                        letterSpacing: "0.05em",
+                        border: isManualBadge ? "1px solid #f59e0b" : "1px solid rgba(56, 189, 248, 0.4)"
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Live Breakdown Badges */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "6px",
+                  fontSize: "0.7rem",
+                  background: "rgba(2, 6, 23, 0.6)",
+                  padding: "6px 10px",
+                  borderRadius: "4px",
+                  border: "1px dashed rgba(148, 163, 184, 0.2)"
+                }}>
+                  <span style={{ color: "var(--text-muted)" }}>Format Breakdown:</span>
+                  <span className="mono" style={{ background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8", padding: "1px 5px", borderRadius: "3px" }}>
+                    {currentDept.code} ({currentDept.id})
+                  </span>
+                  <span style={{ color: "var(--text-muted)" }}>-</span>
+                  <span className="mono" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981", padding: "1px 5px", borderRadius: "3px" }}>
+                    {currentRank.code} ({currentRank.id})
+                  </span>
+                  <span style={{ color: "var(--text-muted)" }}>-</span>
+                  <span className="mono" style={{ background: "rgba(245, 158, 11, 0.15)", color: "#f59e0b", padding: "1px 5px", borderRadius: "3px" }}>
+                    {currentDistCode} ({selectedDistrict})
+                  </span>
+                  <span style={{ color: "var(--text-muted)" }}>-</span>
+                  <span className="mono" style={{ background: "rgba(168, 85, 247, 0.15)", color: "#c084fc", padding: "1px 5px", borderRadius: "3px" }}>
+                    {formatNameSlug(fullName) || "NAME"}
+                  </span>
+                </div>
+              </div>
+
+              {/* STEP 4: STATION / UNIT & PASSWORD */}
+              <div style={{
+                background: "rgba(15, 23, 42, 0.6)",
+                padding: "12px",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid rgba(56, 189, 248, 0.2)",
+                marginBottom: "14px"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "#38bdf8", fontSize: "0.82rem", fontWeight: 600 }}>
+                  <KeyRound size={14} />
+                  <span>4. Posting Unit &amp; Authentication</span>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Police Station / Court Unit / Lab</label>
+                    <input
+                      type="text"
+                      className="gov-input"
+                      placeholder="e.g. City Police Station"
+                      value={stationId}
+                      onChange={(e) => setStationId(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Temporary Password</label>
+                    <input
+                      type="password"
+                      className="gov-input"
+                      placeholder="••••••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="gov-label">Full Name &amp; Designation</label>
+                  <label className="gov-label" style={{ fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Camera size={14} />
+                    Official Photo (Optional — Live Webcam Enrollment Available)
+                  </label>
                   <input
-                    type="text"
+                    type="file"
+                    accept="image/*"
                     className="gov-input"
-                    placeholder="e.g. Sub-Inspector R. Sharma"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    required
+                    onChange={handlePhotoSelect}
                   />
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "8px" }}>
+                    {photoPreview && (
+                      <div style={{
+                        width: "46px",
+                        height: "56px",
+                        borderRadius: "4px",
+                        overflow: "hidden",
+                        border: "1px solid #10b981",
+                        flexShrink: 0
+                      }}>
+                        <img src={photoPreview} alt="Preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      </div>
+                    )}
+                    <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                      {photoFile ? (
+                        <span style={{ color: "#34d399" }}>Photo attached ({photoFile.name}): Pre-seeding biometric template.</span>
+                      ) : (
+                        <span>No photo uploaded? The officer can 1-click register their live face via webcam upon first login (TOFU).</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label className="gov-label">Temporary Password</label>
-                  <input
-                    type="password"
-                    className="gov-input"
-                    placeholder="••••••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="gov-label">Assigned Role</label>
-                  <select className="gov-select" value={role} onChange={(e) => setRole(e.target.value)}>
-                    <option value="INVESTIGATING_OFFICER">Investigating Officer (IO)</option>
-                    <option value="STATION_HOUSE_OFFICER">Station House Officer (SHO)</option>
-                    <option value="FORENSIC_ANALYST">Forensic Science Analyst (FSL)</option>
-                    <option value="JUDICIAL_MAGISTRATE">Judicial Magistrate / Judge</option>
-                    <option value="PUBLIC_PROSECUTOR">Public Prosecutor</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label className="gov-label">Branch / Cell</label>
-                  <select className="gov-select" value={branch} onChange={(e) => setBranch(e.target.value)}>
-                    <option value="Local Police">Local Police (Law &amp; Order)</option>
-                    <option value="Women Safety Division">Women Safety Division (POCSO/Assault)</option>
-                    <option value="Cyber Crime Cell">Cyber Crime Investigation Unit</option>
-                    <option value="CFSL Cyber Forensics">CFSL Cyber Forensics Lab</option>
-                    <option value="CFSL DNA Division">CFSL Biology &amp; DNA Lab</option>
-                    <option value="Judiciary">District &amp; Sessions Judiciary</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="gov-label">State / Union Territory</label>
-                  <select className="gov-select" value={state} onChange={(e) => setState(e.target.value)}>
-                    <option value="Manipur">Manipur</option>
-                    <option value="Delhi">Delhi (NCT)</option>
-                    <option value="Maharashtra">Maharashtra</option>
-                    <option value="Assam">Assam</option>
-                    <option value="National">National / Central Directorate</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
-                <div>
-                  <label className="gov-label">District / Zone</label>
-                  <input
-                    type="text"
-                    className="gov-input"
-                    value={district}
-                    onChange={(e) => setDistrict(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="gov-label">Police Station / Court Unit</label>
-                  <input
-                    type="text"
-                    className="gov-input"
-                    value={stationId}
-                    onChange={(e) => setStationId(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: "20px" }}>
-                <label className="gov-label">Official Photo (Mandatory for Face 2FA)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="gov-input"
-                  onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-                  required
-                />
-                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
-                  Used to generate the 128-D cryptographic facial vector during officer login.
-                </span>
-              </div>
-
-              <button type="submit" className="btn btn-primary" style={{ width: "100%" }} disabled={submitting}>
+              <button type="submit" className="btn btn-primary" style={{ width: "100%", padding: "12px" }} disabled={submitting}>
                 {submitting ? <RefreshCw className="animate-spin" size={16} /> : <UserPlus size={16} />}
-                Create Departmental User &amp; Enroll Face 2FA
+                Provision Credential ({badgeId || "USER"}) &amp; Enable Sovereign Access
               </button>
             </form>
           </div>
