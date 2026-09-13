@@ -756,6 +756,18 @@ export const DEPARTMENTS: DepartmentInfo[] = [
         name: "Station House Officer (SHO)",
         code: "SHO",
         role: "STATION_HOUSE_OFFICER"
+      },
+      {
+        id: "CYB_OFF",
+        name: "Cyber Crime Officer (CCO)",
+        code: "CYB",
+        role: "INVESTIGATING_OFFICER"
+      },
+      {
+        id: "SP",
+        name: "Superintendent of Police (SP / SSP)",
+        code: "SP",
+        role: "STATION_HOUSE_OFFICER"
       }
     ]
   },
@@ -765,28 +777,95 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     code: "FOR",
     ranks: [
       {
-        id: "FSL",
+        id: "FSL_ANL",
         name: "Forensic Science Analyst / Examiner",
         code: "FSL",
+        role: "FORENSIC_ANALYST"
+      },
+      {
+        id: "CYB_EXAM",
+        name: "Cyber Forensics & Digital Evidence Examiner",
+        code: "CYB",
+        role: "FORENSIC_ANALYST"
+      },
+      {
+        id: "BAL_EXP",
+        name: "Ballistics & Explosives Expert",
+        code: "BAL",
+        role: "FORENSIC_ANALYST"
+      },
+      {
+        id: "DNA_EXAM",
+        name: "DNA & Serology Expert",
+        code: "DNA",
+        role: "FORENSIC_ANALYST"
+      },
+      {
+        id: "FSL_DIR",
+        name: "Director / Senior Scientific Officer (FSL)",
+        code: "DIR",
         role: "FORENSIC_ANALYST"
       }
     ]
   },
   {
     id: "JUDICIARY",
-    name: "Judiciary & Prosecution",
+    name: "Judiciary & District Courts",
     code: "JUD",
     ranks: [
       {
-        id: "MAG",
-        name: "Judicial Magistrate / Judge",
+        id: "DSJ",
+        name: "Principal District & Sessions Judge",
+        code: "DSJ",
+        role: "JUDICIAL_MAGISTRATE"
+      },
+      {
+        id: "CJM",
+        name: "Chief Judicial Magistrate (CJM)",
+        code: "CJM",
+        role: "JUDICIAL_MAGISTRATE"
+      },
+      {
+        id: "POC_JDG",
+        name: "Special POCSO / Crimes Against Women Judge",
+        code: "POC",
+        role: "JUDICIAL_MAGISTRATE"
+      },
+      {
+        id: "JMFC",
+        name: "Judicial Magistrate First Class (JMFC)",
         code: "MAG",
         role: "JUDICIAL_MAGISTRATE"
       },
       {
-        id: "PROS",
-        name: "Public Prosecutor",
-        code: "PROS",
+        id: "HCJ",
+        name: "High Court Appellate Bench Justice",
+        code: "HCJ",
+        role: "JUDICIAL_MAGISTRATE"
+      }
+    ]
+  },
+  {
+    id: "PROSECUTION",
+    name: "Directorate of Prosecution",
+    code: "PRO",
+    ranks: [
+      {
+        id: "PP",
+        name: "Public Prosecutor (Sessions Court)",
+        code: "PP",
+        role: "PUBLIC_PROSECUTOR"
+      },
+      {
+        id: "APP",
+        name: "Assistant Public Prosecutor (CJM Court)",
+        code: "APP",
+        role: "PUBLIC_PROSECUTOR"
+      },
+      {
+        id: "DOP",
+        name: "Director of Prosecution (State HQ)",
+        code: "DOP",
         role: "PUBLIC_PROSECUTOR"
       }
     ]
@@ -806,7 +885,173 @@ export const DEPARTMENTS: DepartmentInfo[] = [
   }
 ];
 
-// 4. Smart Name Slug Generation
+// 4. Contextual Facility / Station / Lab / Bench Directory Generator
+export interface FacilityOption {
+  name: string;
+  code: string;
+  category: string;
+}
+
+export function getDepartmentFacilities(
+  state: string,
+  district: string,
+  deptId: string
+): FacilityOption[] {
+  const safeState = state || "Manipur";
+  const safeDistrict = district || "Imphal West";
+
+  switch (deptId) {
+    case "FORENSIC": {
+      const facilities: FacilityOption[] = [
+        {
+          name: `State Forensic Science Laboratory (SFSL) - ${safeDistrict}, ${safeState}`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-SFSL`,
+          category: "State FSL"
+        },
+        {
+          name: `Regional Forensic Science Laboratory (RFSL) - ${safeDistrict}`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-RFSL`,
+          category: "Regional FSL"
+        },
+        {
+          name: `District Mobile Forensic Unit (DMFU) - ${safeDistrict}`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-DMFU`,
+          category: "Mobile Unit"
+        },
+        {
+          name: `Cyber Forensics & Digital Evidence Division - ${safeDistrict}`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-CYB-FSL`,
+          category: "Digital Forensics"
+        }
+      ];
+
+      // Add national and premier regional centres
+      if (safeState === "Manipur" || safeState === "Assam" || safeState === "Meghalaya" || safeState === "Nagaland" || safeState === "Mizoram" || safeState === "Tripura" || safeState === "Arunachal Pradesh") {
+        facilities.push({
+          name: "CFSL Kamrup / Guwahati (Cyber Forensics Hub)",
+          code: "CFSL-KAMRUP-GUW",
+          category: "Central FSL (NE Hub)"
+        });
+        facilities.push({
+          name: "State Forensic Science Lab (Pangei, Manipur)",
+          code: "MN-SFSL-IMPHAL",
+          category: "State FSL Main Lab"
+        });
+      }
+      if (safeState === "Delhi (NCT)") {
+        facilities.push({
+          name: "FSL Rohini Delhi (Cyber & DNA Division)",
+          code: "DL-SFSL-ROH",
+          category: "State FSL Delhi"
+        });
+      }
+      facilities.push({
+        name: "CFSL New Delhi (CBI Headquarters)",
+        code: "CFSL-NEW-DELHI",
+        category: "Central FSL CBI"
+      });
+      facilities.push({
+        name: "CFSL Hyderabad (Digital Forensics & Ballistics)",
+        code: "CFSL-HYDERABAD",
+        category: "Central FSL"
+      });
+      facilities.push({
+        name: "CFSL Chandigarh (DNA & Questioned Documents)",
+        code: "CFSL-CHANDIGARH",
+        category: "Central FSL"
+      });
+      return facilities;
+    }
+
+    case "JUDICIARY": {
+      return [
+        {
+          name: `Principal District & Sessions Court (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-SESS-CRT`,
+          category: "District Sessions Court"
+        },
+        {
+          name: `Chief Judicial Magistrate (CJM) Bench (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-CJM-CRT`,
+          category: "Magistrate Court"
+        },
+        {
+          name: `Special POCSO / Fast Track Court (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-POCSO-CRT`,
+          category: "Special Fast Track Court"
+        },
+        {
+          name: `Judicial Magistrate First Class (JMFC) Court (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-JMFC-CRT`,
+          category: "JMFC Court"
+        },
+        {
+          name: `High Court of ${safeState} (Principal / Circuit Bench)`,
+          code: `${safeState.slice(0, 3).toUpperCase()}-HIGH-CRT`,
+          category: "High Court Bench"
+        }
+      ];
+    }
+
+    case "PROSECUTION": {
+      return [
+        {
+          name: `Office of Public Prosecutor - Sessions Court (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-PP-OFFICE`,
+          category: "Sessions Prosecution"
+        },
+        {
+          name: `Office of Assistant Public Prosecutor - CJM Court (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-APP-OFFICE`,
+          category: "Magistrate Prosecution"
+        },
+        {
+          name: `Special Prosecution Cell (POCSO & Cyber Crimes) - ${safeDistrict}`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-SPC-OFFICE`,
+          category: "Specialized Prosecution"
+        },
+        {
+          name: `Directorate of Prosecution - State HQ (${safeState})`,
+          code: `${safeState.slice(0, 3).toUpperCase()}-DOP-HQ`,
+          category: "Directorate HQ"
+        }
+      ];
+    }
+
+    case "POLICE":
+    default: {
+      return [
+        {
+          name: `City / Headquarters Police Station (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-CITY-PS`,
+          category: "Headquarters Police Station"
+        },
+        {
+          name: `Cyber Crime Police Station (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-CYB-PS`,
+          category: "Specialized Cyber Station"
+        },
+        {
+          name: `Women & Child Protection Police Station (${safeDistrict})`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-WOMEN-PS`,
+          category: "Specialized Women Station"
+        },
+        {
+          name: `District Crime Records Bureau (DCRB) - ${safeDistrict}`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-DCRB`,
+          category: "Crime Records Bureau"
+        },
+        {
+          name: `Superintendent of Police (SP) Headquarters - ${safeDistrict}`,
+          code: `${safeDistrict.slice(0, 3).toUpperCase()}-SP-HQ`,
+          category: "District Command HQ"
+        }
+      ];
+    }
+  }
+}
+
+// 5. Smart Name Slug Generation
 export function formatNameSlug(name: string): string {
   if (!name) return "";
   // Strip formal prefixes like SI, IO, SHO, Dr, Mr, Shri, Smt, etc.
@@ -835,7 +1080,7 @@ export function formatNameSlug(name: string): string {
   return upper.slice(0, 8);
 }
 
-// 5. Dynamic Badge / Username Generator
+// 6. Dynamic Badge / Username Generator
 export function generateBadgeId(
   deptCode: string,
   rankCode: string,

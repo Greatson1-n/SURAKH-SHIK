@@ -1,8 +1,17 @@
 import React, { useState, useEffect } from "react";
-import { Folder, FilePlus, Share2, Shield, Upload, FileText, Lock, Eye, RefreshCw, CheckCircle2, ShieldCheck, AlertTriangle, Sparkles } from "lucide-react";
+import { 
+  Folder, FilePlus, Share2, Shield, Upload, FileText, Lock, Eye, 
+  RefreshCw, CheckCircle2, ShieldCheck, AlertTriangle, Sparkles,
+  MapPin, Building2, UserCheck
+} from "lucide-react";
 import { api } from "../services/api";
 import { WatermarkViewer } from "../components/WatermarkViewer";
 import { BlockExplorer } from "../components/BlockExplorer";
+import { 
+  INDIA_STATES, 
+  INDIA_DISTRICTS, 
+  getDepartmentFacilities 
+} from "../data/indiaLocations";
 
 interface OfficerDashboardProps {
   user: any;
@@ -28,13 +37,44 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadReport, setUploadReport] = useState<any>(null);
 
-  // Targeted Sharing Modal
+  // Targeted Sharing Modal - Dynamic Multi-Tier Hierarchy
   const [showShareModal, setShowShareModal] = useState(false);
-  const [recipientDept, setRecipientDept] = useState("CFSL-KAMRUP-GUW");
+  const [targetState, setTargetState] = useState(user?.state || "Manipur");
+  const [targetDistrict, setTargetDistrict] = useState(user?.district || "Imphal West");
+  const [targetDeptId, setTargetDeptId] = useState("FORENSIC");
+  const [targetFacility, setTargetFacility] = useState("State Forensic Science Lab (Pangei, Manipur)");
+  const [isCustomFacility, setIsCustomFacility] = useState(false);
+  const [customFacilityName, setCustomFacilityName] = useState("");
+  const [targetRole, setTargetRole] = useState("ANY_AUTHORIZED_PERSONNEL");
+  const [statutoryPurpose, setStatutoryPurpose] = useState("Section 173(8) BNSS 2023 - Forensic Examination & Evidence Extraction");
   const [permission, setPermission] = useState("FORENSIC_ANALYSIS");
   const [validityDays, setValidityDays] = useState(30);
+  const [shareRemarks, setShareRemarks] = useState("");
   const [shareMsg, setShareMsg] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+
+  const targetDistrictList = INDIA_DISTRICTS[targetState] || [];
+  const availableFacilities = getDepartmentFacilities(targetState, targetDistrict, targetDeptId);
+
+  // Auto-sync default facility when jurisdiction or department changes
+  useEffect(() => {
+    const facs = getDepartmentFacilities(targetState, targetDistrict, targetDeptId);
+    if (facs.length > 0) {
+      setTargetFacility(facs[0].name);
+    } else {
+      setTargetFacility("");
+    }
+  }, [targetState, targetDistrict, targetDeptId]);
+
+  const handleTargetStateChange = (newState: string) => {
+    setTargetState(newState);
+    const newDistList = INDIA_DISTRICTS[newState] || [];
+    if (newDistList.length > 0) {
+      setTargetDistrict(newDistList[0].name);
+    } else {
+      setTargetDistrict("");
+    }
+  };
 
   // View Document in memory
   const [viewingDocId, setViewingDocId] = useState<string | null>(null);
@@ -151,18 +191,28 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
     setSharing(true);
     setShareMsg(null);
     try {
+      const finalFacility = isCustomFacility && customFacilityName.trim() 
+        ? customFacilityName.trim() 
+        : (targetFacility || `${targetDistrict} Central Unit`);
+
       const res = await api.grantSharing({
         case_id: selectedCaseId,
-        recipient_dept: recipientDept,
+        recipient_dept: finalFacility,
         permission: permission,
         validity_days: validityDays,
+        target_state: targetState,
+        target_district: targetDistrict,
+        target_dept: targetDeptId,
+        target_role: targetRole,
+        statutory_purpose: statutoryPurpose,
+        remarks: shareRemarks || statutoryPurpose,
       });
       setShareMsg(`Targeted access granted to ${res.recipient}. Digital custody transfer recorded on Ledger Block #${res.ledger_block}.`);
       setTimeout(() => {
         setShowShareModal(false);
         setShareMsg(null);
         handleSelectCase(selectedCaseId);
-      }, 2000);
+      }, 2500);
     } catch (err: any) {
       alert(err.message || "Sharing failed.");
     } finally {
@@ -751,13 +801,20 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
       {/* MODAL: TARGETED SELECTIVE SHARING */}
       {showShareModal && (
         <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: "580px" }}>
+          <div className="modal-content" style={{ maxWidth: "680px", maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border-subtle)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <Share2 size={20} color="#eab308" />
-                <h3 style={{ fontSize: "1.1rem" }}>
-                  Targeted Cryptographic Sharing
-                </h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ background: "rgba(234, 179, 8, 0.15)", padding: "8px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Share2 size={22} color="#eab308" />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: "1.15rem", margin: 0, color: "#f8fafc" }}>
+                    Targeted Cryptographic Sharing
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    Compartmentalized cross-departmental evidence dispatch under BNSS &amp; BSA 2023
+                  </p>
+                </div>
               </div>
               <button className="btn btn-secondary" style={{ padding: "4px 8px" }} onClick={() => setShowShareModal(false)}>
                 Cancel
@@ -765,51 +822,253 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
             </div>
 
             <div style={{ padding: "14px 24px 0" }}>
-              <div className="gov-card" style={{ background: "rgba(234, 179, 8, 0.08)", border: "1px solid rgba(234, 179, 8, 0.2)", padding: "12px", fontSize: "0.82rem" }}>
-                <strong>Strict Inter-Departmental Control:</strong> Only the recipient selected below will receive a wrapped decryption key. 
-                All other police stations and departments across India will remain 100% locked out.
+              <div className="gov-card" style={{ background: "rgba(234, 179, 8, 0.08)", border: "1px solid rgba(234, 179, 8, 0.25)", padding: "12px 14px", fontSize: "0.82rem", display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                <ShieldCheck size={20} color="#eab308" style={{ flexShrink: 0, marginTop: "2px" }} />
+                <div>
+                  <strong style={{ color: "#fde047" }}>Cryptographic Compartmentalization &amp; Zero-Knowledge Isolation:</strong>
+                  <div style={{ color: "#cbd5e1", marginTop: "3px", lineHeight: "1.4" }}>
+                    Only the designated recipient agency and cleared role selected below will be provisioned with an ECIES-wrapped decryption key. 
+                    All other police stations, courts, and forensics hubs across India will remain 100% locked out.
+                  </div>
+                </div>
               </div>
             </div>
 
             {shareMsg && (
-              <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: "rgba(16, 185, 129, 0.15)", border: "1px solid #10b981", color: "#6ee7b7", borderRadius: "var(--radius-md)", fontSize: "0.82rem" }}>
-                {shareMsg}
+              <div style={{ margin: "14px 24px 0", padding: "12px 16px", background: "rgba(16, 185, 129, 0.15)", border: "1px solid #10b981", color: "#6ee7b7", borderRadius: "var(--radius-md)", fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "8px" }}>
+                <CheckCircle2 size={18} />
+                <span>{shareMsg}</span>
               </div>
             )}
 
             <form onSubmit={handleGrantTargetedShare} style={{ padding: "16px 24px 24px" }}>
-              <div style={{ marginBottom: "14px" }}>
-                <label className="gov-label">Target External Department / Forensic Lab</label>
-                <select className="gov-select" value={recipientDept} onChange={(e) => setRecipientDept(e.target.value)}>
-                  <option value="CFSL-KAMRUP-GUW">CFSL Kamrup / Guwahati (Cyber Forensics Hub)</option>
-                  <option value="MN-SFSL-IMPHAL">State Forensic Science Lab (Pangei, Manipur)</option>
-                  <option value="MN-CRT-IW-SESS">Sessions Court Imphal West (Judicial Bench)</option>
-                  <option value="DL-SFSL-ROH">FSL Rohini Delhi (Cyber &amp; DNA)</option>
-                  <option value="CFSL-NEW-DELHI">CFSL New Delhi (CBI Headquarters)</option>
-                </select>
+              {/* STEP 1: TARGET JURISDICTION */}
+              <div style={{ background: "rgba(15, 23, 42, 0.6)", padding: "12px 14px", borderRadius: "var(--radius-md)", border: "1px solid rgba(56, 189, 248, 0.2)", marginBottom: "14px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "#38bdf8", fontSize: "0.82rem", fontWeight: 600 }}>
+                  <MapPin size={14} />
+                  <span>1. Target Jurisdiction (All-India Geography)</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Target State / UT</label>
+                    <select
+                      className="gov-select"
+                      value={targetState}
+                      onChange={(e) => handleTargetStateChange(e.target.value)}
+                      required
+                    >
+                      {INDIA_STATES.map((st) => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>
+                      Target District / Zone ({targetDistrictList.length} Districts)
+                    </label>
+                    <select
+                      className="gov-select"
+                      value={targetDistrict}
+                      onChange={(e) => setTargetDistrict(e.target.value)}
+                      required
+                    >
+                      {targetDistrictList.map((d) => (
+                        <option key={d.name} value={d.name}>
+                          {d.name} ({d.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px", marginBottom: "20px" }}>
+              {/* STEP 2: TARGET DEPARTMENT & FACILITY */}
+              <div style={{ background: "rgba(15, 23, 42, 0.6)", padding: "12px 14px", borderRadius: "var(--radius-md)", border: "1px solid rgba(56, 189, 248, 0.2)", marginBottom: "14px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "#38bdf8", fontSize: "0.82rem", fontWeight: 600 }}>
+                  <Building2 size={14} />
+                  <span>2. Target Agency &amp; Facility Unit</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: "12px", marginBottom: "8px" }}>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Agency Wing / Department</label>
+                    <select
+                      className="gov-select"
+                      value={targetDeptId}
+                      onChange={(e) => setTargetDeptId(e.target.value)}
+                      required
+                    >
+                      <option value="FORENSIC">🔬 Forensic Science Lab (FSL / CFSL)</option>
+                      <option value="JUDICIARY">⚖️ Judiciary &amp; District Courts</option>
+                      <option value="PROSECUTION">🏛️ Directorate of Prosecution</option>
+                      <option value="POLICE">👮 Police Inter-Agency / Special Units</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <label className="gov-label" style={{ fontSize: "0.75rem", marginBottom: 0 }}>Specific Facility / Unit</label>
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomFacility(!isCustomFacility)}
+                        style={{ background: "none", border: "none", color: "#38bdf8", fontSize: "0.7rem", cursor: "pointer", textDecoration: "underline" }}
+                      >
+                        {isCustomFacility ? "Pick Listed Facility" : "+ Custom Agency Name"}
+                      </button>
+                    </div>
+                    {isCustomFacility ? (
+                      <input
+                        type="text"
+                        className="gov-input"
+                        placeholder="e.g. CFSL Kamrup Cyber Lab or Session Court Bench"
+                        value={customFacilityName}
+                        onChange={(e) => setCustomFacilityName(e.target.value)}
+                        required
+                      />
+                    ) : (
+                      <select
+                        className="gov-select"
+                        value={targetFacility}
+                        onChange={(e) => {
+                          if (e.target.value === "__CUSTOM__") {
+                            setIsCustomFacility(true);
+                            setCustomFacilityName("");
+                          } else {
+                            setTargetFacility(e.target.value);
+                          }
+                        }}
+                        required
+                      >
+                        {availableFacilities.map((fac) => (
+                          <option key={fac.code} value={fac.name}>
+                            {fac.name}
+                          </option>
+                        ))}
+                        <option value="__CUSTOM__">Other / Enter Custom Agency...</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* STEP 3: ROLE CLEARANCE & STATUTORY MANDATE */}
+              <div style={{ background: "rgba(15, 23, 42, 0.6)", padding: "12px 14px", borderRadius: "var(--radius-md)", border: "1px solid rgba(56, 189, 248, 0.2)", marginBottom: "14px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px", color: "#38bdf8", fontSize: "0.82rem", fontWeight: 600 }}>
+                  <UserCheck size={14} />
+                  <span>3. Role Clearance &amp; Statutory Legal Mandate</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Target Role Clearance</label>
+                    <select
+                      className="gov-select"
+                      value={targetRole}
+                      onChange={(e) => setTargetRole(e.target.value)}
+                      required
+                    >
+                      <option value="ANY_AUTHORIZED_PERSONNEL">All Verified Personnel at Facility</option>
+                      <option value="FORENSIC_ANALYST">Forensic Science Analyst / Examiner Only</option>
+                      <option value="JUDICIAL_MAGISTRATE">Judicial Magistrate / Judge Only</option>
+                      <option value="PUBLIC_PROSECUTOR">Public Prosecutor Only</option>
+                      <option value="INVESTIGATING_OFFICER">Investigating Officer / CID Only</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Statutory Purpose (BNSS / BSA)</label>
+                    <select
+                      className="gov-select"
+                      value={statutoryPurpose}
+                      onChange={(e) => setStatutoryPurpose(e.target.value)}
+                      required
+                    >
+                      <option value="Section 173(8) BNSS 2023 - Forensic Examination & Evidence Extraction">
+                        Sec 173(8) BNSS - Forensic Examination &amp; Opinion
+                      </option>
+                      <option value="Section 63 BSA 2023 - Electronic Record Judicial Submission & Production">
+                        Sec 63 BSA - Electronic Evidence Court Production
+                      </option>
+                      <option value="Section 230 BNSS 2023 - Supply of Police Report & Documents to Bench">
+                        Sec 230 BNSS - Supply of Report to Court/Accused
+                      </option>
+                      <option value="Section 72 BNS 2023 - Confidential Transmission with Redacted Identity">
+                        Sec 72 BNS - Protected Identity Transmission
+                      </option>
+                      <option value="Inter-Departmental Crime Investigation Coordination">
+                        Inter-Agency Investigation Coordination (CID / I4C)
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* STEP 4: PERMISSION SCOPE & TTL DURATION */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
                 <div>
-                  <label className="gov-label">Permission Scope</label>
+                  <label className="gov-label" style={{ fontSize: "0.75rem" }}>Cryptographic Permission Scope</label>
                   <select className="gov-select" value={permission} onChange={(e) => setPermission(e.target.value)}>
-                    <option value="FORENSIC_ANALYSIS">Forensic Analysis (Raw Bitstream)</option>
-                    <option value="PROSECUTION_REVIEW">Prosecution Scrutiny</option>
-                    <option value="READ_ONLY">Read-Only (Watermarked)</option>
+                    <option value="FORENSIC_ANALYSIS">Forensic Analysis (Raw Bitstream &amp; Hashes)</option>
+                    <option value="PROSECUTION_REVIEW">Prosecution Scrutiny (Full Dossier &amp; Redactions)</option>
+                    <option value="READ_ONLY">Read-Only (Watermarked In-Memory View)</option>
                   </select>
                 </div>
-
                 <div>
-                  <label className="gov-label">Access Duration (Days)</label>
-                  <input
-                    type="number"
-                    className="gov-input"
-                    min="1"
-                    max="90"
+                  <label className="gov-label" style={{ fontSize: "0.75rem" }}>Access Validity Period</label>
+                  <select
+                    className="gov-select"
                     value={validityDays}
                     onChange={(e) => setValidityDays(parseInt(e.target.value))}
-                    required
-                  />
+                  >
+                    <option value={7}>7 Days (Urgent Bail / Forensic Triaging)</option>
+                    <option value={15}>15 Days (Standard Pre-Trial Hearing)</option>
+                    <option value={30}>30 Days (Standard 1 Month Dispatch)</option>
+                    <option value={60}>60 Days (Comprehensive Lab Analysis)</option>
+                    <option value={90}>90 Days (Full Trial Proceedings - Max BNSS)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: "14px" }}>
+                <label className="gov-label" style={{ fontSize: "0.75rem" }}>
+                  Dispatch Memo / Statutory Reference Letter (Optional)
+                </label>
+                <input
+                  type="text"
+                  className="gov-input"
+                  placeholder="e.g. Memo No. FSL/2026/CYB-882 or Requisition Ref"
+                  value={shareRemarks}
+                  onChange={(e) => setShareRemarks(e.target.value)}
+                />
+              </div>
+
+              {/* LIVE SECURITY BREAKDOWN PILL */}
+              <div style={{
+                background: "rgba(2, 6, 23, 0.8)",
+                padding: "10px 14px",
+                borderRadius: "var(--radius-md)",
+                border: "1px dashed rgba(234, 179, 8, 0.4)",
+                marginBottom: "20px",
+                fontSize: "0.75rem"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                  <span style={{ color: "#eab308", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
+                    <Shield size={13} />
+                    Verified Cryptographic Envelope:
+                  </span>
+                  <span className="mono" style={{ color: "#38bdf8", fontSize: "0.7rem" }}>
+                    AES-256-GCM + ECIES Keywrap
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                  <span style={{ background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8", padding: "2px 8px", borderRadius: "4px" }}>
+                    📍 {targetState} &rsaquo; {targetDistrict}
+                  </span>
+                  <span style={{ background: "rgba(168, 85, 247, 0.15)", color: "#c084fc", padding: "2px 8px", borderRadius: "4px" }}>
+                    🏢 {isCustomFacility && customFacilityName ? customFacilityName : targetFacility}
+                  </span>
+                  <span style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981", padding: "2px 8px", borderRadius: "4px" }}>
+                    🛡️ Role: {targetRole}
+                  </span>
+                  <span style={{ background: "rgba(234, 179, 8, 0.15)", color: "#fde047", padding: "2px 8px", borderRadius: "4px" }}>
+                    ⏳ {validityDays} Days TTL
+                  </span>
                 </div>
               </div>
 
@@ -817,7 +1076,7 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
                 <button type="button" className="btn btn-secondary" onClick={() => setShowShareModal(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={sharing}>
+                <button type="submit" className="btn btn-primary" disabled={sharing} style={{ background: "linear-gradient(135deg, #eab308, #ca8a04)", color: "#0f172a", fontWeight: 600 }}>
                   {sharing ? <RefreshCw className="animate-spin" size={16} /> : <Share2 size={16} />}
                   Grant Wrapped Key &amp; Log Custody
                 </button>

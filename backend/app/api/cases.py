@@ -34,6 +34,7 @@ def list_cases(user: dict = Depends(get_current_user_token), device: str = Depen
     """
     role = user.get("role")
     user_state = user.get("state")
+    user_district = user.get("district")
     user_station = user.get("station_id")
     user_badge = user.get("sub")
 
@@ -47,32 +48,41 @@ def list_cases(user: dict = Depends(get_current_user_token), device: str = Depen
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Judicial Magistrates can see cases within their court jurisdiction
+    shared_case_sql = """
+        SELECT case_id FROM targeted_shares 
+        WHERE status = 'ACTIVE' 
+          AND (
+            recipient_dept = ?
+            OR (
+              (target_state IS NOT NULL AND target_state != '' AND target_state = ?)
+              AND (target_district IS NULL OR target_district = '' OR target_district = ?)
+              AND (target_role IS NULL OR target_role = '' OR target_role = 'ANY_AUTHORIZED_PERSONNEL' OR target_role = ?)
+            )
+          )
+    """
+
+    # Judicial Magistrates can see cases within their court jurisdiction or targeted shares
     if role in ["JUDICIAL_MAGISTRATE", "PUBLIC_PROSECUTOR"]:
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT * FROM cases 
-        WHERE state = ? OR case_id IN (
-            SELECT case_id FROM targeted_shares WHERE recipient_dept = ? AND status = 'ACTIVE'
-        ) ORDER BY created_at DESC;
-        """, (user_state, user_station))
+        WHERE state = ? OR case_id IN ({shared_case_sql}) 
+        ORDER BY created_at DESC;
+        """, (user_state, user_station, user_state, user_district, role))
     elif role == "FORENSIC_ANALYST":
         # FSL Analysts only see cases where evidence was explicitly dispatched to their lab!
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT * FROM cases 
-        WHERE case_id IN (
-            SELECT case_id FROM targeted_shares WHERE recipient_dept = ? AND status = 'ACTIVE'
-        ) ORDER BY created_at DESC;
-        """, (user_station,))
+        WHERE case_id IN ({shared_case_sql}) 
+        ORDER BY created_at DESC;
+        """, (user_station, user_state, user_district, role))
     else:
         # Police Officers (IO / SHO): Scoped strictly to their State AND Police Station
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT * FROM cases 
         WHERE (state = ? AND station_id = ?) 
-           OR case_id IN (
-               SELECT case_id FROM targeted_shares WHERE recipient_dept = ? AND status = 'ACTIVE'
-           )
+           OR case_id IN ({shared_case_sql})
         ORDER BY created_at DESC;
-        """, (user_state, user_station, user_station))
+        """, (user_state, user_station, user_station, user_state, user_district, role))
 
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
@@ -152,8 +162,16 @@ def get_case_details(case_id: str, user: dict = Depends(get_current_user_token),
     if not is_authorized and user.get("role") != "SYSTEM_ADMIN":
         # Check targeted shares
         cursor.execute(
-            "SELECT COUNT(*) FROM targeted_shares WHERE case_id = ? AND recipient_dept = ? AND status = 'ACTIVE';",
-            (case_id, user.get("station_id"))
+            """SELECT COUNT(*) FROM targeted_shares 
+            WHERE case_id = ? AND status = 'ACTIVE' AND (
+                recipient_dept = ?
+                OR (
+                    (target_state IS NOT NULL AND target_state != '' AND target_state = ?)
+                    AND (target_district IS NULL OR target_district = '' OR target_district = ?)
+                    AND (target_role IS NULL OR target_role = '' OR target_role = 'ANY_AUTHORIZED_PERSONNEL' OR target_role = ?)
+                )
+            );""",
+            (case_id, user.get("station_id"), user.get("state"), user.get("district"), user.get("role"))
         )
         if cursor.fetchone()[0] == 0:
             conn.close()
@@ -200,8 +218,16 @@ def verify_case_tamper(case_id: str, user: dict = Depends(get_current_user_token
     )
     if not is_authorized and user.get("role") != "SYSTEM_ADMIN":
         cursor.execute(
-            "SELECT COUNT(*) FROM targeted_shares WHERE case_id = ? AND recipient_dept = ? AND status = 'ACTIVE';",
-            (case_id, user.get("station_id"))
+            """SELECT COUNT(*) FROM targeted_shares 
+            WHERE case_id = ? AND status = 'ACTIVE' AND (
+                recipient_dept = ?
+                OR (
+                    (target_state IS NOT NULL AND target_state != '' AND target_state = ?)
+                    AND (target_district IS NULL OR target_district = '' OR target_district = ?)
+                    AND (target_role IS NULL OR target_role = '' OR target_role = 'ANY_AUTHORIZED_PERSONNEL' OR target_role = ?)
+                )
+            );""",
+            (case_id, user.get("station_id"), user.get("state"), user.get("district"), user.get("role"))
         )
         if cursor.fetchone()[0] == 0:
             conn.close()

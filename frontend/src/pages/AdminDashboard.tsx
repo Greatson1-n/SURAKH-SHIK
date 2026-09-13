@@ -11,7 +11,8 @@ import {
   INDIA_DISTRICTS, 
   DEPARTMENTS, 
   generateBadgeId, 
-  formatNameSlug 
+  formatNameSlug,
+  getDepartmentFacilities 
 } from "../data/indiaLocations";
 
 export const AdminDashboard: React.FC = () => {
@@ -42,7 +43,8 @@ export const AdminDashboard: React.FC = () => {
   const [badgeId, setBadgeId] = useState("POL-IO-IMP");
   const [isManualBadge, setIsManualBadge] = useState(false);
   const [password, setPassword] = useState("");
-  const [stationId, setStationId] = useState("City Police Station");
+  const [stationId, setStationId] = useState("City / Headquarters Police Station (Imphal West)");
+  const [isCustomStation, setIsCustomStation] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [formMsg, setFormMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
@@ -82,6 +84,7 @@ export const AdminDashboard: React.FC = () => {
   const currentDistCode = currentDistObj.code;
   const currentRole = currentRank.role;
   const currentBranch = currentDept.name;
+  const suggestedFacilities = getDepartmentFacilities(selectedState, selectedDistrict, selectedDeptId);
 
   // Real-time Badge ID / Username Auto-generation
   useEffect(() => {
@@ -94,10 +97,19 @@ export const AdminDashboard: React.FC = () => {
   const handleStateChange = (newState: string) => {
     setSelectedState(newState);
     const newDistList = INDIA_DISTRICTS[newState] || [];
-    if (newDistList.length > 0) {
-      setSelectedDistrict(newDistList[0].name);
-    } else {
-      setSelectedDistrict("");
+    const newDistrict = newDistList.length > 0 ? newDistList[0].name : "";
+    setSelectedDistrict(newDistrict);
+    if (!isCustomStation) {
+      const facs = getDepartmentFacilities(newState, newDistrict, selectedDeptId);
+      if (facs.length > 0) setStationId(facs[0].name);
+    }
+  };
+
+  const handleDistrictChange = (newDistrict: string) => {
+    setSelectedDistrict(newDistrict);
+    if (!isCustomStation) {
+      const facs = getDepartmentFacilities(selectedState, newDistrict, selectedDeptId);
+      if (facs.length > 0) setStationId(facs[0].name);
     }
   };
 
@@ -106,6 +118,10 @@ export const AdminDashboard: React.FC = () => {
     const dept = DEPARTMENTS.find((d) => d.id === newDeptId) || DEPARTMENTS[0];
     if (dept.ranks.length > 0) {
       setSelectedRankId(dept.ranks[0].id);
+    }
+    if (!isCustomStation) {
+      const facs = getDepartmentFacilities(selectedState, selectedDistrict, newDeptId);
+      if (facs.length > 0) setStationId(facs[0].name);
     }
   };
 
@@ -395,7 +411,7 @@ export const AdminDashboard: React.FC = () => {
                     <select 
                       className="gov-select" 
                       value={selectedDistrict} 
-                      onChange={(e) => setSelectedDistrict(e.target.value)}
+                      onChange={(e) => handleDistrictChange(e.target.value)}
                       required
                     >
                       {districtList.map((dst) => (
@@ -571,15 +587,57 @@ export const AdminDashboard: React.FC = () => {
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
                   <div>
-                    <label className="gov-label" style={{ fontSize: "0.75rem" }}>Police Station / Court Unit / Lab</label>
-                    <input
-                      type="text"
-                      className="gov-input"
-                      placeholder="e.g. City Police Station"
-                      value={stationId}
-                      onChange={(e) => setStationId(e.target.value)}
-                      required
-                    />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <label className="gov-label" style={{ fontSize: "0.75rem", marginBottom: 0 }}>
+                        Assigned Unit / Lab / Court Bench
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomStation(!isCustomStation)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#38bdf8",
+                          fontSize: "0.7rem",
+                          cursor: "pointer",
+                          textDecoration: "underline"
+                        }}
+                      >
+                        {isCustomStation ? "Pick Suggested Unit" : "+ Custom Unit"}
+                      </button>
+                    </div>
+
+                    {isCustomStation ? (
+                      <input
+                        type="text"
+                        className="gov-input"
+                        placeholder="e.g. Special Cyber Cell or SFSL Pangei"
+                        value={stationId}
+                        onChange={(e) => setStationId(e.target.value)}
+                        required
+                      />
+                    ) : (
+                      <select
+                        className="gov-select"
+                        value={stationId}
+                        onChange={(e) => {
+                          if (e.target.value === "__CUSTOM__") {
+                            setIsCustomStation(true);
+                            setStationId("");
+                          } else {
+                            setStationId(e.target.value);
+                          }
+                        }}
+                        required
+                      >
+                        {suggestedFacilities.map((fac) => (
+                          <option key={fac.code} value={fac.name}>
+                            {fac.name}
+                          </option>
+                        ))}
+                        <option value="__CUSTOM__">Other / Enter Custom Unit...</option>
+                      </select>
+                    )}
                   </div>
                   <div>
                     <label className="gov-label" style={{ fontSize: "0.75rem" }}>Temporary Password</label>

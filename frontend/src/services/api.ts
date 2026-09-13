@@ -303,7 +303,19 @@ export const api = {
   },
 
   // Targeted Sharing
-  grantSharing: async (payload: { case_id: string; document_id?: string; recipient_dept: string; permission: string; validity_days: number }) => {
+  grantSharing: async (payload: { 
+    case_id: string; 
+    document_id?: string; 
+    recipient_dept: string; 
+    permission: string; 
+    validity_days: number;
+    target_state?: string;
+    target_district?: string;
+    target_dept?: string;
+    target_role?: string;
+    statutory_purpose?: string;
+    remarks?: string;
+  }) => {
     const res = await fetch(`${API_BASE}/api/sharing/grant`, {
       method: "POST",
       headers: getHeaders(),

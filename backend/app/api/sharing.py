@@ -22,10 +22,15 @@ def get_current_user_token(authorization: str = Header(None)) -> dict:
 class TargetedShareRequest(BaseModel):
     case_id: str
     document_id: Optional[str] = None
-    recipient_dept: str   # e.g., "CFSL-KAMRUP-GUW" or "Sessions Court Imphal West"
+    recipient_dept: str   # e.g., "CFSL Kamrup / Guwahati (Cyber Forensics Hub)" or facility code
     permission: str       # "READ_ONLY", "FORENSIC_ANALYSIS", "PROSECUTION_REVIEW"
     validity_days: int = 30
     remarks: str = "Dispatched for scientific / judicial examination"
+    target_state: Optional[str] = None
+    target_district: Optional[str] = None
+    target_dept: Optional[str] = None
+    target_role: Optional[str] = None
+    statutory_purpose: Optional[str] = None
 
 class RevokeShareRequest(BaseModel):
     share_id: str
@@ -38,8 +43,8 @@ def grant_targeted_sharing(
 ):
     """
     Targeted Cryptographic Sharing:
-    Explicitly grants access to a specific external department (e.g., Manipur IO sharing with CFSL Kamrup).
-    All other departments remain strictly isolated and cannot view this record.
+    Explicitly grants access to a specific external department or role across any Indian State/District.
+    All non-targeted police stations and departments across India remain strictly locked out.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -61,20 +66,29 @@ def grant_targeted_sharing(
     expires_at = (now + timedelta(days=payload.validity_days)).isoformat()
     wrapped_key_sim = f"ECIES-WRAPPED-KEY-{payload.recipient_dept}-{uuid.uuid4().hex[:16]}"
 
+    target_desc = f"{payload.recipient_dept}"
+    if payload.target_state and payload.target_district:
+        target_desc += f" [{payload.target_state} / {payload.target_district}"
+        if payload.target_dept:
+            target_desc += f" - {payload.target_dept}"
+        if payload.target_role and payload.target_role != "ANY_AUTHORIZED_PERSONNEL":
+            target_desc += f" - Role:{payload.target_role}"
+        target_desc += "]"
+
     # Commit to blockchain ledger
     ledger_res = SovereignConsortiumLedger.transfer_custody(
         case_id=payload.case_id,
         doc_id=payload.document_id or "CASE_BUNDLE",
         from_dept=f"{user.get('state')} Police ({user.get('station_id')})",
-        to_dept=payload.recipient_dept,
+        to_dept=target_desc,
         transferred_by=user.get("sub"),
-        remarks=payload.remarks
+        remarks=f"{payload.statutory_purpose or payload.remarks} (Scope: {payload.permission})"
     )
 
     cursor.execute(
         """INSERT INTO targeted_shares 
-        (share_id, case_id, document_id, originating_dept, recipient_dept, permission, wrapped_key, granted_by, granted_at, expires_at, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE');""",
+        (share_id, case_id, document_id, originating_dept, recipient_dept, permission, wrapped_key, granted_by, granted_at, expires_at, status, target_state, target_district, target_dept, target_role, statutory_purpose)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?);""",
         (
             share_id,
             payload.case_id,
@@ -85,7 +99,12 @@ def grant_targeted_sharing(
             wrapped_key_sim,
             user.get("sub"),
             now.isoformat(),
-            expires_at
+            expires_at,
+            payload.target_state,
+            payload.target_district,
+            payload.target_dept,
+            payload.target_role,
+            payload.statutory_purpose
         )
     )
 
@@ -93,7 +112,7 @@ def grant_targeted_sharing(
     cursor.execute(
         """INSERT INTO audit_logs (log_id, actor_badge, actor_role, action, target_ref, ip_address, device_id, timestamp, signature)
         VALUES (?, ?, ?, 'TARGETED_SHARE_GRANTED', ?, '127.0.0.1', ?, ?, 'SIG-SHARE');""",
-        (str(uuid.uuid4()), user.get("sub"), user.get("role"), f"Target:{payload.recipient_dept} Case:{payload.case_id}", device, now.isoformat())
+        (str(uuid.uuid4()), user.get("sub"), user.get("role"), f"Target:{target_desc} Case:{payload.case_id}", device, now.isoformat())
     )
 
     conn.commit()
@@ -102,7 +121,7 @@ def grant_targeted_sharing(
     return {
         "status": "SUCCESS",
         "share_id": share_id,
-        "recipient": payload.recipient_dept,
+        "recipient": target_desc,
         "permission": payload.permission,
         "expires_at": expires_at,
         "ledger_block": ledger_res["block_number"],
@@ -113,9 +132,14 @@ def grant_targeted_sharing(
 def get_inbound_shares(user: dict = Depends(get_current_user_token)):
     """
     Retrieve documents and cases that have been selectively shared with
-    the current logged-in department (e.g. CFSL Kamrup or Court).
+    the current logged-in department or officer based on exact station ID OR
+    dynamic multi-tier jurisdictional clearance (state, district, department, and role).
     """
     user_station = user.get("station_id")
+    user_state = user.get("state")
+    user_district = user.get("district")
+    user_role = user.get("role")
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -123,9 +147,17 @@ def get_inbound_shares(user: dict = Depends(get_current_user_token)):
     SELECT s.*, c.fir_number, c.title as case_title, c.state as originating_state
     FROM targeted_shares s
     JOIN cases c ON s.case_id = c.case_id
-    WHERE s.recipient_dept = ? AND s.status = 'ACTIVE'
+    WHERE s.status = 'ACTIVE'
+      AND (
+        s.recipient_dept = ?
+        OR (
+          (s.target_state IS NOT NULL AND s.target_state != '' AND s.target_state = ?)
+          AND (s.target_district IS NULL OR s.target_district = '' OR s.target_district = ?)
+          AND (s.target_role IS NULL OR s.target_role = '' OR s.target_role = 'ANY_AUTHORIZED_PERSONNEL' OR s.target_role = ?)
+        )
+      )
     ORDER BY s.granted_at DESC;
-    """, (user_station,))
+    """, (user_station, user_state, user_district, user_role))
     
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
