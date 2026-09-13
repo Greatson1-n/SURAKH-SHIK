@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { 
   ShieldCheck, Microscope, Gavel, RefreshCw, Upload, Award, FileText, 
-  Eye, CheckCircle2, AlertTriangle, X, Sparkles 
+  Eye, CheckCircle2, AlertTriangle, X, Sparkles, Search
 } from "lucide-react";
 import { api } from "../services/api";
 import { WatermarkViewer } from "../components/WatermarkViewer";
@@ -30,6 +30,69 @@ export const ForensicAndJudicialDashboard: React.FC<ForensicAndJudicialDashboard
   const [reportFile, setReportFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadReport, setUploadReport] = useState<any>(null);
+
+  // Omni-Search State (FIR #, Date, Document Type, & Tesseract OCR Keywords)
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchDocType, setSearchDocType] = useState("ALL");
+  const [searchDateFrom, setSearchDateFrom] = useState("");
+  const [searchDateTo, setSearchDateTo] = useState("");
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  // Debounced search trigger across cases & Tesseract OCR text
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      const q = searchQuery.trim();
+      if (!q && searchDocType === "ALL" && !searchDateFrom && !searchDateTo) {
+        setSearchResults(null);
+        return;
+      }
+      setSearching(true);
+      try {
+        const res = await api.searchDocuments({
+          query: q || undefined,
+          file_type: searchDocType !== "ALL" ? searchDocType : undefined,
+          date_from: searchDateFrom || undefined,
+          date_to: searchDateTo || undefined,
+        });
+        setSearchResults(res.results || []);
+      } catch (err) {
+        console.error("Search error:", err);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchDocType, searchDateFrom, searchDateTo]);
+
+  const handleClearSearch = () => {
+    setSearchQuery("");
+    setSearchDocType("ALL");
+    setSearchDateFrom("");
+    setSearchDateTo("");
+    setSearchResults(null);
+  };
+
+  const filteredInboundShares = inboundShares.filter((s) => {
+    if (!searchQuery.trim() && !searchDateFrom && !searchDateTo) return true;
+    const q = searchQuery.toLowerCase().trim();
+    const matchFir = s.fir_number?.toLowerCase().includes(q);
+    const matchTitle = s.case_title?.toLowerCase().includes(q);
+    const matchDept = s.originating_dept?.toLowerCase().includes(q);
+    const matchOcr = searchResults?.some((doc) => doc.case_id === s.case_id);
+    return matchFir || matchTitle || matchDept || matchOcr;
+  });
+
+  const filteredCases = cases.filter((c) => {
+    if (!searchQuery.trim() && !searchDateFrom && !searchDateTo) return true;
+    const q = searchQuery.toLowerCase().trim();
+    const matchFir = c.fir_number?.toLowerCase().includes(q);
+    const matchTitle = c.title?.toLowerCase().includes(q);
+    const matchDate = c.incident_date?.includes(q);
+    const matchOcr = searchResults?.some((doc) => doc.case_id === c.case_id);
+    return matchFir || matchTitle || matchDate || matchOcr;
+  });
 
   const loadData = async () => {
     try {
@@ -145,29 +208,177 @@ export const ForensicAndJudicialDashboard: React.FC<ForensicAndJudicialDashboard
 
       {activeTab === "INBOX" && (
         <>
+          {/* LEGAL AGENCY OMNI-SEARCH TOOLBAR */}
+          <div className="gov-card" style={{ marginBottom: "20px", padding: "16px 20px", background: "rgba(10, 25, 47, 0.8)", border: "1px solid rgba(6, 182, 212, 0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Search size={18} color="#06b6d4" />
+                <strong style={{ fontSize: "0.98rem", color: "#f8fafc" }}>
+                  {isJudge ? "Judicial Docket & Evidence Omni-Search" : "Forensic Repository Omni-Search"}
+                </strong>
+                <span className="gov-badge badge-blue" style={{ fontSize: "0.68rem" }}>
+                  FIR # &bull; Dispatching Lab/Station &bull; Tesseract OCR Extracted Text
+                </span>
+              </div>
+
+              {(searchQuery || searchDocType !== "ALL" || searchDateFrom || searchDateTo) && (
+                <button
+                  onClick={handleClearSearch}
+                  style={{
+                    background: "rgba(239, 68, 68, 0.15)",
+                    border: "1px solid rgba(239, 68, 68, 0.4)",
+                    color: "#fca5a5",
+                    borderRadius: "4px",
+                    padding: "4px 10px",
+                    fontSize: "0.74rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    cursor: "pointer"
+                  }}
+                >
+                  <X size={12} /> Clear Filters
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr 1fr 1fr", gap: "12px", alignItems: "center" }}>
+              {/* Main Search Input */}
+              <div style={{ position: "relative" }}>
+                <input
+                  type="text"
+                  className="gov-input"
+                  placeholder="Search FIR #, case title, forensic report keywords, or OCR text..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ paddingLeft: "36px", fontSize: "0.85rem" }}
+                />
+                <Search size={16} color="var(--text-muted)" style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)" }} />
+              </div>
+
+              {/* Doc Type Filter */}
+              <div>
+                <select
+                  className="gov-select"
+                  value={searchDocType}
+                  onChange={(e) => setSearchDocType(e.target.value)}
+                  style={{ fontSize: "0.82rem" }}
+                >
+                  <option value="ALL">All Document Types</option>
+                  <option value="FORENSIC_REPORT">Forensic Report</option>
+                  <option value="SEIZURE_MEMO">Seizure Memo</option>
+                  <option value="WITNESS_STATEMENT">Witness Statement</option>
+                  <option value="FIR_COPY">FIR Copy</option>
+                  <option value="CHARGESHEET">Chargesheet</option>
+                  <option value="COURT_ORDER">Court Order</option>
+                </select>
+              </div>
+
+              {/* Date From */}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>From:</span>
+                <input
+                  type="date"
+                  className="gov-input"
+                  value={searchDateFrom}
+                  onChange={(e) => setSearchDateFrom(e.target.value)}
+                  style={{ fontSize: "0.78rem", padding: "6px 8px" }}
+                />
+              </div>
+
+              {/* Date To */}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>To:</span>
+                <input
+                  type="date"
+                  className="gov-input"
+                  value={searchDateTo}
+                  onChange={(e) => setSearchDateTo(e.target.value)}
+                  style={{ fontSize: "0.78rem", padding: "6px 8px" }}
+                />
+              </div>
+            </div>
+
+            {/* OCR Text Matches Panel */}
+            {searchResults && (
+              <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px dashed rgba(6, 182, 212, 0.2)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "0.8rem", color: "#06b6d4", fontWeight: 600 }}>
+                    Found {searchResults.length} document match{searchResults.length === 1 ? "" : "es"} in scientific &amp; legal archives:
+                  </span>
+                  {searching && <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>Searching OCR text...</span>}
+                </div>
+
+                {searchResults.length > 0 ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "10px", maxHeight: "200px", overflowY: "auto" }}>
+                    {searchResults.map((resDoc) => (
+                      <div
+                        key={resDoc.document_id}
+                        onClick={() => handleInspectCase(resDoc.case_id)}
+                        style={{
+                          background: "rgba(6, 17, 32, 0.85)",
+                          border: "1px solid var(--border-subtle)",
+                          borderRadius: "6px",
+                          padding: "10px 12px",
+                          cursor: "pointer",
+                          transition: "all 0.2s ease"
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                          <strong style={{ fontSize: "0.82rem", color: "#f8fafc" }}>{resDoc.file_name}</strong>
+                          <span className="gov-badge badge-blue" style={{ fontSize: "0.62rem" }}>{resDoc.file_type}</span>
+                        </div>
+
+                        <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginBottom: "4px" }}>
+                          Case: <span className="mono" style={{ color: "#38bdf8" }}>{resDoc.fir_number}</span> ({resDoc.case_title}) &bull; Date: {resDoc.incident_date}
+                        </div>
+
+                        {resDoc.matched_in_ocr && resDoc.ocr_snippet && (
+                          <div style={{
+                            fontSize: "0.72rem",
+                            color: "#6ee7b7",
+                            background: "rgba(16, 185, 129, 0.1)",
+                            borderLeft: "2px solid #10b981",
+                            padding: "4px 8px",
+                            marginTop: "4px",
+                            borderRadius: "2px"
+                          }}>
+                            <span style={{ fontWeight: 700, color: "#34d399" }}>OCR Text Match: </span>
+                            "{resDoc.ocr_snippet}"
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", padding: "8px 0" }}>
+                    No document text or case attributes matched the query "{searchQuery}".
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Forensic Analyst View: Inbound Dispatches */}
           {!isJudge ? (
             <div className="gov-card">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <h3 style={{ fontSize: "1.1rem", display: "flex", alignItems: "center", gap: "8px" }}>
                   <Microscope size={18} color="#06b6d4" />
-                  Selectively Shared Evidence Dispatches ({inboundShares.length})
+                  Selectively Shared Evidence Dispatches ({filteredInboundShares.length})
                 </h3>
                 <button className="btn btn-secondary" onClick={loadData}>
                   <RefreshCw size={14} /> Refresh
                 </button>
               </div>
 
-              {inboundShares.length === 0 ? (
+              {filteredInboundShares.length === 0 ? (
                 <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)", background: "#061120", borderRadius: "var(--radius-md)" }}>
-                  <p style={{ fontSize: "0.9rem" }}>No active evidence dispatches received by {user.station_id} yet.</p>
-                  <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: "6px" }}>
-                    When an Investigating Officer (e.g. from Manipur Police) grants targeted access to your lab, the case will appear here.
-                  </p>
+                  <p style={{ fontSize: "0.9rem" }}>{inboundShares.length === 0 ? `No active evidence dispatches received by ${user.station_id} yet.` : `No dispatches matched your search filters.`}</p>
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {inboundShares.map((s) => (
+                  {filteredInboundShares.map((s) => (
                     <div
                       key={s.share_id}
                       style={{
@@ -224,16 +435,16 @@ export const ForensicAndJudicialDashboard: React.FC<ForensicAndJudicialDashboard
             <div className="gov-card">
               <h3 style={{ fontSize: "1.15rem", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
                 <Gavel size={20} color="#eab308" />
-                Active Court Docket Files ({cases.length})
+                Active Court Docket Files ({filteredCases.length})
               </h3>
 
-              {cases.length === 0 ? (
+              {filteredCases.length === 0 ? (
                 <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)", background: "#061120", borderRadius: "var(--radius-md)" }}>
-                  No case filings awaiting judicial examination in this district.
+                  {cases.length === 0 ? "No case filings awaiting judicial examination in this district." : "No court dockets matched the search filters."}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {cases.map((c) => (
+                  {filteredCases.map((c) => (
                     <div
                       key={c.case_id}
                       style={{

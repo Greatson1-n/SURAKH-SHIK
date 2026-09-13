@@ -3,7 +3,8 @@ import os
 import base64
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form, status
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form, status, Query
 from fastapi.responses import PlainTextResponse
 from app.core.config import VAULT_DIR
 from app.core.security import generate_dek, encrypt_bytes, decrypt_bytes, compute_sha256, decode_access_token
@@ -124,6 +125,161 @@ async def upload_document(
             "merkle_root": ocr_result["merkle_root"],
             "leaf_count": ocr_result["leaf_count"]
         }
+    }
+
+@router.get("/search")
+def search_documents(
+    query: Optional[str] = Query(None, description="Keyword, FIR #, title, or OCR extracted text"),
+    file_type: Optional[str] = Query(None, description="Filter by document type"),
+    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    case_id: Optional[str] = Query(None, description="Filter within specific case"),
+    user: dict = Depends(get_current_user_token),
+    device: str = Depends(verify_departmental_device)
+):
+    """
+    Forensic & Legal Agency Omni-Search Engine:
+    Searches across FIR numbers, case titles, incident dates, document types,
+    and deep textual keywords extracted by Tesseract OCR / Redaction pipeline.
+    Respects strict jurisdictional compartmentalization.
+    """
+    role = user.get("role")
+    if role == "SYSTEM_ADMIN":
+        raise HTTPException(
+            status_code=403,
+            detail="The Blind Admin Rule: System Administrators manage infrastructure and are cryptographically barred from searching, decrypting, or viewing criminal evidence dossiers."
+        )
+
+    user_state = user.get("state")
+    user_district = user.get("district")
+    user_station = user.get("station_id")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    shared_case_sql = """
+        SELECT case_id FROM targeted_shares 
+        WHERE status = 'ACTIVE' 
+          AND (
+            recipient_dept = ?
+            OR (
+              (target_state IS NOT NULL AND target_state != '' AND target_state = ?)
+              AND (target_district IS NULL OR target_district = '' OR target_district = ?)
+              AND (target_role IS NULL OR target_role = '' OR target_role = 'ANY_AUTHORIZED_PERSONNEL' OR target_role = ?)
+            )
+          )
+    """
+
+    params = []
+    if role in ["JUDICIAL_MAGISTRATE", "PUBLIC_PROSECUTOR"]:
+        base_case_condition = f"(c.state = ? OR c.case_id IN ({shared_case_sql}))"
+        params.extend([user_state, user_station, user_state, user_district, role])
+    elif role == "FORENSIC_ANALYST":
+        base_case_condition = f"(c.case_id IN ({shared_case_sql}))"
+        params.extend([user_station, user_state, user_district, role])
+    else:
+        # Police Officers (IO / SHO): Scoped to state and station OR targeted shares
+        base_case_condition = f"((c.state = ? AND c.station_id = ?) OR c.case_id IN ({shared_case_sql}))"
+        params.extend([user_state, user_station, user_station, user_state, user_district, role])
+
+    conditions = [base_case_condition]
+
+    if case_id:
+        conditions.append("d.case_id = ?")
+        params.append(case_id)
+
+    if file_type and file_type != "ALL":
+        conditions.append("d.file_type = ?")
+        params.append(file_type)
+
+    if date_from:
+        conditions.append("(c.incident_date >= ? OR d.created_at >= ?)")
+        params.extend([date_from, date_from])
+
+    if date_to:
+        conditions.append("(c.incident_date <= ? OR d.created_at <= ?)")
+        params.extend([date_to, date_to + "T23:59:59"])
+
+    if query and query.strip():
+        q_wildcard = f"%{query.strip()}%"
+        conditions.append(
+            """(
+                c.fir_number LIKE ? 
+                OR c.title LIKE ? 
+                OR d.file_name LIKE ? 
+                OR d.file_type LIKE ? 
+                OR d.extracted_text LIKE ? 
+                OR d.redacted_text LIKE ?
+            )"""
+        )
+        params.extend([q_wildcard, q_wildcard, q_wildcard, q_wildcard, q_wildcard, q_wildcard])
+
+    where_clause = " AND ".join(conditions)
+    sql = f"""
+        SELECT 
+            d.document_id,
+            d.case_id,
+            d.file_name,
+            d.file_type,
+            d.content_hash_sha256,
+            d.author_badge,
+            d.author_role,
+            d.is_redacted,
+            d.extracted_text,
+            d.redacted_text,
+            d.created_at as document_created_at,
+            c.fir_number,
+            c.title as case_title,
+            c.incident_date,
+            c.state as case_state,
+            c.district as case_district,
+            c.station_id as case_station,
+            c.sensitivity_level
+        FROM documents d
+        JOIN cases c ON d.case_id = c.case_id
+        WHERE {where_clause}
+        ORDER BY d.created_at DESC
+        LIMIT 100;
+    """
+
+    cursor.execute(sql, tuple(params))
+    rows = cursor.fetchall()
+    conn.close()
+
+    results = []
+    q_lower = query.strip().lower() if query else ""
+
+    for r in rows:
+        item = dict(r)
+        extracted = item.get("extracted_text") or ""
+        redacted = item.get("redacted_text") or ""
+        text_source = redacted if item.get("is_redacted") else extracted
+
+        snippet = None
+        matched_in_ocr = False
+
+        if q_lower and text_source:
+            pos = text_source.lower().find(q_lower)
+            if pos != -1:
+                matched_in_ocr = True
+                start = max(0, pos - 45)
+                end = min(len(text_source), pos + len(q_lower) + 45)
+                prefix = "..." if start > 0 else ""
+                suffix = "..." if end < len(text_source) else ""
+                snippet = f"{prefix}{text_source[start:end]}{suffix}"
+
+        item["matched_in_ocr"] = matched_in_ocr
+        item["ocr_snippet"] = snippet
+        # Remove giant full text from search index response
+        del item["extracted_text"]
+        del item["redacted_text"]
+        results.append(item)
+
+    return {
+        "status": "SUCCESS",
+        "query": query,
+        "total_matches": len(results),
+        "results": results
     }
 
 @router.get("/{doc_id}/view")

@@ -65,7 +65,29 @@ export const AdminDashboard: React.FC = () => {
         api.getDevices(),
         api.getAuditLogs(),
       ]);
-      setUsers(uRes.users || []);
+      let currentUsers = uRes.users || [];
+
+      // Auto-reconciliation: ensure provisioned officers are preserved across cloud container cold restarts
+      try {
+        const savedRaw = localStorage.getItem("SURAKH_SAVED_OFFICERS");
+        if (savedRaw) {
+          const savedOfficers = JSON.parse(savedRaw);
+          if (Array.isArray(savedOfficers) && savedOfficers.length > 0) {
+            const missing = savedOfficers.filter(
+              (so: any) => !currentUsers.some((u: any) => u.badge_id === so.badge_id)
+            );
+            if (missing.length > 0) {
+              await api.reconcileUsers(missing);
+              const refreshed = await api.getUsers();
+              currentUsers = refreshed.users || currentUsers;
+            }
+          }
+        }
+      } catch (recErr) {
+        console.warn("Officer auto-reconcile error:", recErr);
+      }
+
+      setUsers(currentUsers);
       setDevices(dRes.devices || []);
       setAuditLogs(aRes.audit_logs || []);
     } catch (err) {
@@ -177,6 +199,27 @@ export const AdminDashboard: React.FC = () => {
         type: "success" 
       });
       
+      // Sync to local backup so user never vanishes across container cold restarts
+      try {
+        const savedRaw = localStorage.getItem("SURAKH_SAVED_OFFICERS");
+        const list = savedRaw ? JSON.parse(savedRaw) : [];
+        const newOfficer = {
+          badge_id: badgeId.trim(),
+          full_name: fullName.trim(),
+          role: currentRole,
+          branch: currentBranch,
+          state: selectedState,
+          district: selectedDistrict,
+          station_id: stationId,
+          is_biometric_enrolled: photoFile ? 1 : 0,
+          is_active: 1
+        };
+        const updated = [...list.filter((x: any) => x.badge_id !== badgeId.trim()), newOfficer];
+        localStorage.setItem("SURAKH_SAVED_OFFICERS", JSON.stringify(updated));
+      } catch (e) {
+        console.warn("Failed to backup officer locally:", e);
+      }
+
       // Reset form
       setFullName("");
       setPassword("");
@@ -192,13 +235,24 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const handleRevokeDevice = async (deviceId: string) => {
-    if (!confirm(`Are you sure you want to trigger the Remote Kill Switch for ${deviceId}?`)) return;
+    if (!confirm(`Are you sure you want to trigger the Remote Kill Switch for ${deviceId}? This laptop will be immediately blocked from accessing SURAKH-SHIK.`)) return;
     try {
       await api.revokeDevice(deviceId, revokeReason);
-      alert(`Device ${deviceId} is now REVOKED.`);
+      alert(`Terminal ${deviceId} is now REVOKED via Remote Kill Switch.`);
       loadData();
     } catch (err: any) {
       alert("Revoke failed.");
+    }
+  };
+
+  const handleReinstateDevice = async (deviceId: string) => {
+    if (!confirm(`Restore access for terminal ${deviceId}? This will lift the kill switch lockout.`)) return;
+    try {
+      await api.reinstateDevice(deviceId, "Reinstated by Departmental IT Admin");
+      alert(`Terminal ${deviceId} has been reinstated to ACTIVE status.`);
+      loadData();
+    } catch (err: any) {
+      alert("Failed to reinstate device.");
     }
   };
 
@@ -212,6 +266,20 @@ export const AdminDashboard: React.FC = () => {
         reason: terminationReason,
         permanent_delete: isPermanentDelete,
       });
+
+      if (isPermanentDelete) {
+        try {
+          const savedRaw = localStorage.getItem("SURAKH_SAVED_OFFICERS");
+          if (savedRaw) {
+            const list = JSON.parse(savedRaw);
+            const filtered = list.filter((x: any) => x.badge_id !== terminatingUser.badge_id);
+            localStorage.setItem("SURAKH_SAVED_OFFICERS", JSON.stringify(filtered));
+          }
+        } catch (e) {
+          console.warn("Failed to update local officer backup:", e);
+        }
+      }
+
       alert(res.message);
       setTerminatingUser(null);
       loadData();
@@ -880,7 +948,17 @@ export const AdminDashboard: React.FC = () => {
                         Remote Kill
                       </button>
                     ) : (
-                      <span style={{ fontSize: "0.76rem", color: "#fca5a5" }}>Revoked / Quarantined</span>
+                      <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", alignItems: "center" }}>
+                        <span style={{ fontSize: "0.76rem", color: "#fca5a5" }}>Revoked / Quarantined</span>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: "3px 8px", fontSize: "0.72rem", borderColor: "#10b981", color: "#6ee7b7" }}
+                          onClick={() => handleReinstateDevice(d.device_id)}
+                          title="Lift Remote Kill lockout and reinstate terminal"
+                        >
+                          Reinstate
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>

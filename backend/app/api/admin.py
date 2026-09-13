@@ -14,8 +14,10 @@ from app.models.database import (
     get_db_connection, 
     save_user_to_registry, 
     update_user_in_registry, 
+    delete_user_from_registry,
     load_persistent_registry, 
-    save_persistent_registry
+    save_persistent_registry,
+    update_device_in_registry
 )
 from app.ledger.blockchain import SovereignConsortiumLedger
 
@@ -264,6 +266,7 @@ def revoke_device(payload: DeviceRevokeRequest, admin: dict = Depends(require_ad
     now_str = datetime.now(timezone.utc).isoformat()
 
     cursor.execute("UPDATE authorized_devices SET status = 'REVOKED' WHERE device_id = ?;", (payload.device_id,))
+    update_device_in_registry(payload.device_id, {"status": "REVOKED"})
     
     # Audit log the revocation
     cursor.execute(
@@ -275,6 +278,77 @@ def revoke_device(payload: DeviceRevokeRequest, admin: dict = Depends(require_ad
     conn.commit()
     conn.close()
     return {"status": "SUCCESS", "message": f"Device {payload.device_id} is permanently REVOKED."}
+
+class DeviceReinstateRequest(BaseModel):
+    device_id: str
+    reason: Optional[str] = "Device reinstated and cleared by Departmental IT Admin"
+
+@router.post("/devices/reinstate")
+def reinstate_device(payload: DeviceReinstateRequest, admin: dict = Depends(require_admin), device_token: str = Depends(verify_departmental_device)):
+    """Restores a previously revoked laptop back to ACTIVE status."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    cursor.execute("UPDATE authorized_devices SET status = 'ACTIVE', last_seen_at = ? WHERE device_id = ?;", (now_str, payload.device_id))
+    update_device_in_registry(payload.device_id, {"status": "ACTIVE", "last_seen_at": now_str})
+    
+    cursor.execute(
+        """INSERT INTO audit_logs (log_id, actor_badge, actor_role, action, target_ref, ip_address, device_id, timestamp, signature)
+        VALUES (?, ?, 'SYSTEM_ADMIN', 'DEVICE_REINSTATED', ?, '127.0.0.1', ?, ?, 'SIG-REINSTATE');""",
+        (str(uuid.uuid4()), admin["sub"], f"Device:{payload.device_id} Reason:{payload.reason}", device_token, now_str)
+    )
+
+    conn.commit()
+    conn.close()
+    return {"status": "SUCCESS", "message": f"Device {payload.device_id} is restored to ACTIVE."}
+
+class BatchReconcileRequest(BaseModel):
+    officers: list
+
+@router.post("/users/batch-reconcile")
+def batch_reconcile_users(payload: BatchReconcileRequest, admin: dict = Depends(require_admin)):
+    """
+    Reconciles provisioned officers from client persistence when ephemeral cloud instances restart.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    restored_count = 0
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    for u in payload.officers:
+        badge = u.get("badge_id")
+        if not badge or badge in {"SHO-MAN-SMT", "FSL-102-IMP", "MAN-IO-102"}:
+            continue
+        cursor.execute("SELECT id FROM users WHERE badge_id = ?;", (badge,))
+        if not cursor.fetchone():
+            cursor.execute(
+                """INSERT INTO users 
+                (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, device_token, is_biometric_enrolled, is_active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                (
+                    badge,
+                    u.get("full_name"),
+                    u.get("password_hash"),
+                    u.get("role"),
+                    u.get("branch"),
+                    u.get("state"),
+                    u.get("district"),
+                    u.get("station_id"),
+                    u.get("photo_path", ""),
+                    u.get("photo_b64", ""),
+                    u.get("device_token", "MHA-SECURE-STATION-DEV-001"),
+                    1 if u.get("is_biometric_enrolled") else 0,
+                    u.get("is_active", 1),
+                    u.get("created_at", now_str)
+                )
+            )
+            save_user_to_registry(u)
+            restored_count += 1
+
+    conn.commit()
+    conn.close()
+    return {"status": "SUCCESS", "restored_count": restored_count}
 
 @router.get("/locations")
 def get_locations():

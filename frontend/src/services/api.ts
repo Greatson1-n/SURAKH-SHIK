@@ -3,11 +3,35 @@ export const API_BASE = (import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000
 export const getDeviceToken = (): string => {
   let token = localStorage.getItem("SURAKH_DEVICE_TOKEN");
   if (!token) {
-    // Default pre-seeded authorized workstation for the main machine
-    token = "MHA-SECURE-STATION-DEV-001";
+    // Generate a unique, permanent hardware terminal identifier for this machine/browser
+    const randId = Math.random().toString(36).substring(2, 6).toUpperCase() + "-" + Math.random().toString(36).substring(2, 6).toUpperCase();
+    token = `MHA-DEV-LAPTOP-${randId}`;
     localStorage.setItem("SURAKH_DEVICE_TOKEN", token);
   }
   return token;
+};
+
+export const getDeviceAssetTag = (): string => {
+  let asset = localStorage.getItem("SURAKH_DEVICE_ASSET");
+  if (!asset) {
+    const ua = navigator.userAgent;
+    let os = "Desktop Workstation";
+    if (ua.includes("Windows NT 10.0") || ua.includes("Windows NT 11.0") || ua.includes("Windows")) os = "Windows 11 Laptop";
+    else if (ua.includes("Mac OS X") || ua.includes("Macintosh")) os = "MacBook Pro Station";
+    else if (ua.includes("Linux")) os = "Secured Linux Terminal";
+    else if (ua.includes("Android")) os = "Field Tactical Tablet (Android)";
+    else if (ua.includes("iPhone") || ua.includes("iPad")) os = "Departmental iOS Unit";
+
+    let browser = "Secured Browser";
+    if (ua.includes("Chrome") && !ua.includes("Edg")) browser = "Chrome";
+    else if (ua.includes("Edg")) browser = "Edge";
+    else if (ua.includes("Firefox")) browser = "Firefox";
+    else if (ua.includes("Safari") && !ua.includes("Chrome")) browser = "Safari";
+
+    asset = `${os} (${browser})`;
+    localStorage.setItem("SURAKH_DEVICE_ASSET", asset);
+  }
+  return asset;
 };
 
 export const setDeviceToken = (token: string) => {
@@ -29,6 +53,7 @@ export const clearAuthToken = () => {
 const getHeaders = (isMultipart = false): HeadersInit => {
   const headers: Record<string, string> = {
     "X-Device-Token": getDeviceToken(),
+    "X-Device-Asset": getDeviceAssetTag(),
   };
   if (!isMultipart) {
     headers["Content-Type"] = "application/json";
@@ -186,6 +211,28 @@ export const api = {
     return res.json();
   },
 
+  reinstateDevice: async (device_id: string, reason?: string) => {
+    const res = await fetch(`${API_BASE}/api/admin/devices/reinstate`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ device_id, reason }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Device reinstatement failed.");
+    }
+    return res.json();
+  },
+
+  reconcileUsers: async (officers: any[]) => {
+    const res = await fetch(`${API_BASE}/api/admin/users/batch-reconcile`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ officers }),
+    });
+    return res.json();
+  },
+
   getLocations: async () => {
     const res = await fetch(`${API_BASE}/api/admin/locations`);
     return res.json();
@@ -299,6 +346,30 @@ export const api = {
 
   getBsaCertificate: async (docId: string) => {
     const res = await fetch(`${API_BASE}/api/documents/${docId}/certificate`, { headers: getHeaders() });
+    return res.json();
+  },
+
+  searchDocuments: async (params: {
+    query?: string;
+    file_type?: string;
+    date_from?: string;
+    date_to?: string;
+    case_id?: string;
+  }) => {
+    const q = new URLSearchParams();
+    if (params.query) q.append("query", params.query);
+    if (params.file_type && params.file_type !== "ALL") q.append("file_type", params.file_type);
+    if (params.date_from) q.append("date_from", params.date_from);
+    if (params.date_to) q.append("date_to", params.date_to);
+    if (params.case_id) q.append("case_id", params.case_id);
+
+    const res = await fetch(`${API_BASE}/api/documents/search?${q.toString()}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Search failed.");
+    }
     return res.json();
   },
 

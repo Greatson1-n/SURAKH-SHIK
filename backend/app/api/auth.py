@@ -9,10 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Header, status
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from PIL import Image
-from app.core.config import PHOTOS_DIR
+from app.core.config import PHOTOS_DIR, ADMIN_USER_ID, ADMIN_PHOTO_NAME
 from app.core.security import verify_password, create_access_token, decode_access_token
 from app.core.device import verify_departmental_device
-from app.models.database import get_db_connection, update_user_in_registry
+from app.models.database import get_db_connection, update_user_in_registry, save_device_to_registry, update_device_in_registry
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -122,8 +122,11 @@ class DeviceEnrollRequest(BaseModel):
     assigned_role: str
 
 @router.get("/device-status")
-def check_device(x_device_token: str = Header(None)):
-    """Check if the requesting device is registered and active."""
+def check_device(
+    x_device_token: str = Header(None),
+    x_device_asset: str = Header(None)
+):
+    """Check if the requesting device is registered, active, or revoked."""
     if not x_device_token:
         return {"authorized": False, "reason": "No token provided."}
     
@@ -131,11 +134,38 @@ def check_device(x_device_token: str = Header(None)):
     cursor = conn.cursor()
     cursor.execute("SELECT asset_tag, status, assigned_station FROM authorized_devices WHERE device_id = ?;", (x_device_token,))
     row = cursor.fetchone()
-    conn.close()
+    now_str = datetime.now(timezone.utc).isoformat()
 
-    if row and row["status"] == "ACTIVE":
-        return {"authorized": True, "asset_tag": row["asset_tag"], "station": row["assigned_station"]}
-    return {"authorized": False, "reason": "Device unregistered or revoked."}
+    if row:
+        if row["status"] == "REVOKED":
+            conn.close()
+            return {"authorized": False, "revoked": True, "reason": "KILL_SWITCH_ACTIVE: Terminal revoked by IT Administration."}
+        cursor.execute("UPDATE authorized_devices SET last_seen_at = ? WHERE device_id = ?;", (now_str, x_device_token))
+        conn.commit()
+        conn.close()
+        update_device_in_registry(x_device_token, {"last_seen_at": now_str})
+        return {"authorized": True, "asset_tag": row["asset_tag"], "station": row["assigned_station"], "status": "ACTIVE"}
+
+    # Auto-register newly connecting terminal as an active field workstation
+    asset_name = x_device_asset or "Departmental Laptop Terminal"
+    cursor.execute(
+        """INSERT INTO authorized_devices 
+        (device_id, asset_tag, assigned_station, assigned_role, status, enrolled_at, last_seen_at)
+        VALUES (?, ?, 'Field Operations', 'FIELD_OFFICER', 'ACTIVE', ?, ?);""",
+        (x_device_token, asset_name, now_str, now_str)
+    )
+    conn.commit()
+    conn.close()
+    save_device_to_registry({
+        "device_id": x_device_token,
+        "asset_tag": asset_name,
+        "assigned_station": "Field Operations",
+        "assigned_role": "FIELD_OFFICER",
+        "status": "ACTIVE",
+        "enrolled_at": now_str,
+        "last_seen_at": now_str
+    })
+    return {"authorized": True, "asset_tag": asset_name, "station": "Field Operations", "status": "ACTIVE"}
 
 @router.post("/device-enroll")
 def enroll_device(payload: DeviceEnrollRequest):
@@ -152,6 +182,16 @@ def enroll_device(payload: DeviceEnrollRequest):
     )
     conn.commit()
     conn.close()
+
+    save_device_to_registry({
+        "device_id": payload.device_id,
+        "asset_tag": payload.asset_tag,
+        "assigned_station": payload.assigned_station,
+        "assigned_role": payload.assigned_role,
+        "status": "ACTIVE",
+        "enrolled_at": now_str,
+        "last_seen_at": now_str
+    })
     return {"status": "SUCCESS", "message": f"Device {payload.asset_tag} authorized successfully."}
 
 @router.post("/login-step1")
@@ -265,17 +305,21 @@ def login_step_2_face(payload: LoginStep2FaceRequest, device_token: str = Depend
         photo_filename = f"{badge_id}.jpg"
         try:
             (PHOTOS_DIR / photo_filename).write_bytes(live_bytes)
+            if badge_id == ADMIN_USER_ID:
+                (PHOTOS_DIR / ADMIN_PHOTO_NAME).write_bytes(live_bytes)
         except Exception:
             pass
 
+        final_photo_name = ADMIN_PHOTO_NAME if badge_id == ADMIN_USER_ID else photo_filename
+
         cursor.execute(
             "UPDATE users SET photo_path = ?, photo_b64 = ?, is_biometric_enrolled = 1 WHERE badge_id = ?;",
-            (photo_filename, raw_b64, badge_id)
+            (final_photo_name, raw_b64, badge_id)
         )
         update_user_in_registry(badge_id, {
-            "photo_path": photo_filename,
+            "photo_path": final_photo_name,
             "photo_b64": raw_b64,
-            "is_biometric_enrolled": True
+            "is_biometric_enrolled": 1
         })
 
         match_score = 1.0

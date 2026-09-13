@@ -31,8 +31,33 @@ def save_user_to_registry(user_dict: dict):
 
 def update_user_in_registry(badge_id: str, updates: dict):
     reg = load_persistent_registry()
-    if badge_id in reg:
+    if badge_id in reg and isinstance(reg[badge_id], dict):
         reg[badge_id].update(updates)
+    else:
+        reg[badge_id] = updates
+    save_persistent_registry(reg)
+
+def delete_user_from_registry(badge_id: str):
+    reg = load_persistent_registry()
+    if badge_id in reg:
+        del reg[badge_id]
+        save_persistent_registry(reg)
+
+def load_registered_devices() -> dict:
+    reg = load_persistent_registry()
+    return reg.get("__devices__", {})
+
+def save_device_to_registry(device_dict: dict):
+    reg = load_persistent_registry()
+    if "__devices__" not in reg or not isinstance(reg["__devices__"], dict):
+        reg["__devices__"] = {}
+    reg["__devices__"][device_dict["device_id"]] = device_dict
+    save_persistent_registry(reg)
+
+def update_device_in_registry(device_id: str, updates: dict):
+    reg = load_persistent_registry()
+    if "__devices__" in reg and isinstance(reg["__devices__"], dict) and device_id in reg["__devices__"]:
+        reg["__devices__"][device_id].update(updates)
         save_persistent_registry(reg)
 
 def get_db_connection() -> sqlite3.Connection:
@@ -282,13 +307,13 @@ def seed_initial_data(conn: sqlite3.Connection):
             pass
 
     cursor.execute("SELECT COUNT(*) FROM users WHERE badge_id = ?;", (ADMIN_USER_ID,))
+    now_str = datetime.now(timezone.utc).isoformat()
     if cursor.fetchone()[0] == 0:
-        now_str = datetime.now(timezone.utc).isoformat()
         hashed_pw = hash_password(ADMIN_RAW_PASS)
         cursor.execute(
             """INSERT INTO users 
-            (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, device_token, is_active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+            (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, device_token, is_biometric_enrolled, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
             (
                 ADMIN_USER_ID,
                 "Chief IT Administrator (NCRB)",
@@ -301,16 +326,44 @@ def seed_initial_data(conn: sqlite3.Connection):
                 ADMIN_PHOTO_NAME,
                 admin_photo_b64,
                 "MHA-SECURE-STATION-DEV-001",
+                1 if admin_photo_b64 else 0,
                 1,
                 now_str
             )
         )
-    elif admin_photo_b64:
-        cursor.execute("UPDATE users SET photo_b64 = ? WHERE badge_id = ? AND (photo_b64 IS NULL OR photo_b64 = '');", (admin_photo_b64, ADMIN_USER_ID))
+    else:
+        # Always ensure admin biometrics enrolled flag is set to 1 if photo exists
+        cursor.execute(
+            "UPDATE users SET photo_path = ?, photo_b64 = COALESCE(?, photo_b64), is_biometric_enrolled = ? WHERE badge_id = ?;", 
+            (ADMIN_PHOTO_NAME, admin_photo_b64, 1 if admin_photo_b64 else 0, ADMIN_USER_ID)
+        )
+
+    # Ensure admin user record is maintained in the persistent registry
+    admin_reg = {
+        "badge_id": ADMIN_USER_ID,
+        "full_name": "Chief IT Administrator (NCRB)",
+        "password_hash": hash_password(ADMIN_RAW_PASS),
+        "role": "SYSTEM_ADMIN",
+        "branch": "Administration",
+        "state": "National",
+        "district": "NCRB HQ",
+        "station_id": "MHA-HQ",
+        "photo_path": ADMIN_PHOTO_NAME,
+        "photo_b64": admin_photo_b64,
+        "device_token": "MHA-SECURE-STATION-DEV-001",
+        "is_biometric_enrolled": 1 if admin_photo_b64 else 0,
+        "is_active": 1,
+        "created_at": now_str
+    }
+    update_user_in_registry(ADMIN_USER_ID, admin_reg)
 
     # Lifetime Persistence: Restore any users previously enrolled in persistent registry
+    # Exclude special metadata keys and purged demo accounts
+    PURGED_ACCOUNTS = {"SHO-MAN-SMT", "FSL-102-IMP", "MAN-IO-102"}
     registry = load_persistent_registry()
     for b_id, u in registry.items():
+        if b_id.startswith("__") or b_id in PURGED_ACCOUNTS or not isinstance(u, dict):
+            continue
         cursor.execute("SELECT id FROM users WHERE badge_id = ?;", (b_id,))
         if not cursor.fetchone():
             cursor.execute(
@@ -331,7 +384,7 @@ def seed_initial_data(conn: sqlite3.Connection):
                     u.get("device_token", "MHA-SECURE-STATION-DEV-001"),
                     1 if u.get("is_biometric_enrolled") else 0,
                     u.get("is_active", 1),
-                    u.get("created_at")
+                    u.get("created_at", now_str)
                 )
             )
             # Reconstruct photo file on disk if missing (e.g. fresh ephemeral container)
@@ -342,6 +395,28 @@ def seed_initial_data(conn: sqlite3.Connection):
                         target_p.write_bytes(base64.b64decode(u["photo_b64"]))
                     except Exception:
                         pass
+
+    # Restore registered departmental devices
+    saved_devices = load_registered_devices()
+    for d_id, d in saved_devices.items():
+        if not isinstance(d, dict):
+            continue
+        cursor.execute("SELECT device_id FROM authorized_devices WHERE device_id = ?;", (d_id,))
+        if not cursor.fetchone():
+            cursor.execute(
+                """INSERT INTO authorized_devices 
+                (device_id, asset_tag, assigned_station, assigned_role, status, enrolled_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?);""",
+                (
+                    d.get("device_id"),
+                    d.get("asset_tag", "Departmental Workstation"),
+                    d.get("assigned_station", "HQ"),
+                    d.get("assigned_role", "SYSTEM_ADMIN"),
+                    d.get("status", "ACTIVE"),
+                    d.get("enrolled_at", now_str),
+                    d.get("last_seen_at", now_str)
+                )
+            )
 
     # Genesis Block for Consortium Ledger if empty
     cursor.execute("SELECT COUNT(*) FROM ledger_blocks;")

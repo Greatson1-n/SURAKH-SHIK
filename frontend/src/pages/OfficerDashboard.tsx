@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { 
   Folder, FilePlus, Share2, Shield, Upload, FileText, Lock, Eye, 
   RefreshCw, CheckCircle2, ShieldCheck, AlertTriangle, Sparkles,
-  MapPin, Building2, UserCheck
+  MapPin, Building2, UserCheck, Search, X
 } from "lucide-react";
 import { api } from "../services/api";
 import { WatermarkViewer } from "../components/WatermarkViewer";
@@ -84,6 +84,59 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
   const [auditingCase, setAuditingCase] = useState(false);
   const [docVerificationMap, setDocVerificationMap] = useState<Record<string, any>>({});
   const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
+
+  // Omni-Search State (FIR #, Date, Document Type, & Tesseract OCR Keywords)
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchDocType, setSearchDocType] = useState("ALL");
+  const [searchDateFrom, setSearchDateFrom] = useState("");
+  const [searchDateTo, setSearchDateTo] = useState("");
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  // Debounced search trigger across cases & Tesseract OCR text
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      const q = searchQuery.trim();
+      if (!q && searchDocType === "ALL" && !searchDateFrom && !searchDateTo) {
+        setSearchResults(null);
+        return;
+      }
+      setSearching(true);
+      try {
+        const res = await api.searchDocuments({
+          query: q || undefined,
+          file_type: searchDocType !== "ALL" ? searchDocType : undefined,
+          date_from: searchDateFrom || undefined,
+          date_to: searchDateTo || undefined,
+        });
+        setSearchResults(res.results || []);
+      } catch (err) {
+        console.error("Search error:", err);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchDocType, searchDateFrom, searchDateTo]);
+
+  const handleClearSearch = () => {
+    setSearchQuery("");
+    setSearchDocType("ALL");
+    setSearchDateFrom("");
+    setSearchDateTo("");
+    setSearchResults(null);
+  };
+
+  const filteredCases = cases.filter((c) => {
+    if (!searchQuery.trim() && !searchDateFrom && !searchDateTo) return true;
+    const q = searchQuery.toLowerCase().trim();
+    const matchFir = c.fir_number?.toLowerCase().includes(q);
+    const matchTitle = c.title?.toLowerCase().includes(q);
+    const matchDate = c.incident_date?.includes(q);
+    const matchDocOcr = searchResults?.some((doc) => doc.case_id === c.case_id);
+    return matchFir || matchTitle || matchDate || matchDocOcr;
+  });
 
   const fetchCases = async () => {
     try {
@@ -272,25 +325,177 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
 
       {/* TAB 1: CASES & DOSSIER */}
       {activeTab === "CASES" && (
-        <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: "20px" }}>
-          {/* Left: Case List */}
-          <div className="gov-card" style={{ padding: "16px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <h3 style={{ fontSize: "1rem", color: "#f8fafc" }}>
-                Active Case Files ({cases.length})
-              </h3>
-              <button className="btn btn-secondary" style={{ padding: "4px 8px" }} onClick={fetchCases}>
-                <RefreshCw size={14} />
-              </button>
+        <div>
+          {/* LEGAL AGENCY OMNI-SEARCH TOOLBAR */}
+          <div className="gov-card" style={{ marginBottom: "20px", padding: "16px 20px", background: "rgba(10, 25, 47, 0.8)", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Search size={18} color="#38bdf8" />
+                <strong style={{ fontSize: "0.98rem", color: "#f8fafc" }}>
+                  Legal Agency Omni-Search
+                </strong>
+                <span className="gov-badge badge-blue" style={{ fontSize: "0.68rem" }}>
+                  FIR # &bull; Incident Date &bull; Tesseract OCR Extracted Text
+                </span>
+              </div>
+
+              {(searchQuery || searchDocType !== "ALL" || searchDateFrom || searchDateTo) && (
+                <button
+                  onClick={handleClearSearch}
+                  style={{
+                    background: "rgba(239, 68, 68, 0.15)",
+                    border: "1px solid rgba(239, 68, 68, 0.4)",
+                    color: "#fca5a5",
+                    borderRadius: "4px",
+                    padding: "4px 10px",
+                    fontSize: "0.74rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    cursor: "pointer"
+                  }}
+                >
+                  <X size={12} /> Clear Filters
+                </button>
+              )}
             </div>
 
-            {cases.length === 0 ? (
-              <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: "0.84rem" }}>
-                No cases registered in {user.station_id} yet. Click "Register Case / FIR" above to create your first case.
+            <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr 1fr 1fr", gap: "12px", alignItems: "center" }}>
+              {/* Main Search Input */}
+              <div style={{ position: "relative" }}>
+                <input
+                  type="text"
+                  className="gov-input"
+                  placeholder="Search FIR #, case title, or OCR scanned keywords (e.g. 'weapon', 'Section 72')..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ paddingLeft: "36px", fontSize: "0.85rem" }}
+                />
+                <Search size={16} color="var(--text-muted)" style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)" }} />
               </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "600px", overflowY: "auto" }}>
-                {cases.map((c) => (
+
+              {/* Doc Type Filter */}
+              <div>
+                <select
+                  className="gov-select"
+                  value={searchDocType}
+                  onChange={(e) => setSearchDocType(e.target.value)}
+                  style={{ fontSize: "0.82rem" }}
+                >
+                  <option value="ALL">All Document Types</option>
+                  <option value="FIR_COPY">FIR Copy</option>
+                  <option value="WITNESS_STATEMENT">Witness Statement</option>
+                  <option value="FORENSIC_REPORT">Forensic Report</option>
+                  <option value="SEIZURE_MEMO">Seizure Memo</option>
+                  <option value="CHARGESHEET">Chargesheet</option>
+                  <option value="COURT_ORDER">Court Order</option>
+                </select>
+              </div>
+
+              {/* Date From */}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>From:</span>
+                <input
+                  type="date"
+                  className="gov-input"
+                  value={searchDateFrom}
+                  onChange={(e) => setSearchDateFrom(e.target.value)}
+                  style={{ fontSize: "0.78rem", padding: "6px 8px" }}
+                />
+              </div>
+
+              {/* Date To */}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>To:</span>
+                <input
+                  type="date"
+                  className="gov-input"
+                  value={searchDateTo}
+                  onChange={(e) => setSearchDateTo(e.target.value)}
+                  style={{ fontSize: "0.78rem", padding: "6px 8px" }}
+                />
+              </div>
+            </div>
+
+            {/* OCR Text Matches Panel */}
+            {searchResults && (
+              <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px dashed rgba(56, 189, 248, 0.2)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "0.8rem", color: "#38bdf8", fontWeight: 600 }}>
+                    Found {searchResults.length} document match{searchResults.length === 1 ? "" : "es"} across evidence archives:
+                  </span>
+                  {searching && <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>Searching OCR text...</span>}
+                </div>
+
+                {searchResults.length > 0 ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "10px", maxHeight: "200px", overflowY: "auto" }}>
+                    {searchResults.map((resDoc) => (
+                      <div
+                        key={resDoc.document_id}
+                        onClick={() => handleSelectCase(resDoc.case_id)}
+                        style={{
+                          background: selectedCaseId === resDoc.case_id ? "rgba(56, 189, 248, 0.15)" : "rgba(6, 17, 32, 0.85)",
+                          border: `1px solid ${selectedCaseId === resDoc.case_id ? "var(--accent-blue)" : "var(--border-subtle)"}`,
+                          borderRadius: "6px",
+                          padding: "10px 12px",
+                          cursor: "pointer",
+                          transition: "all 0.2s ease"
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                          <strong style={{ fontSize: "0.82rem", color: "#f8fafc" }}>{resDoc.file_name}</strong>
+                          <span className="gov-badge badge-blue" style={{ fontSize: "0.62rem" }}>{resDoc.file_type}</span>
+                        </div>
+
+                        <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginBottom: "4px" }}>
+                          Case: <span className="mono" style={{ color: "#38bdf8" }}>{resDoc.fir_number}</span> ({resDoc.case_title}) &bull; Date: {resDoc.incident_date}
+                        </div>
+
+                        {resDoc.matched_in_ocr && resDoc.ocr_snippet && (
+                          <div style={{
+                            fontSize: "0.72rem",
+                            color: "#6ee7b7",
+                            background: "rgba(16, 185, 129, 0.1)",
+                            borderLeft: "2px solid #10b981",
+                            padding: "4px 8px",
+                            marginTop: "4px",
+                            borderRadius: "2px"
+                          }}>
+                            <span style={{ fontWeight: 700, color: "#34d399" }}>Matched in OCR Text: </span>
+                            "{resDoc.ocr_snippet}"
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", padding: "8px 0" }}>
+                    No document text or case attributes matched the query "{searchQuery}".
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: "20px" }}>
+            {/* Left: Case List */}
+            <div className="gov-card" style={{ padding: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                <h3 style={{ fontSize: "1rem", color: "#f8fafc" }}>
+                  Active Case Files ({filteredCases.length})
+                </h3>
+                <button className="btn btn-secondary" style={{ padding: "4px 8px" }} onClick={fetchCases}>
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+
+              {filteredCases.length === 0 ? (
+                <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: "0.84rem" }}>
+                  {cases.length === 0 ? `No cases registered in ${user.station_id} yet.` : `No cases matched the search filters.`}
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "600px", overflowY: "auto" }}>
+                  {filteredCases.map((c) => (
                   <div
                     key={c.case_id}
                     onClick={() => handleSelectCase(c.case_id)}
@@ -537,6 +742,7 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
               Select a case from the left to view its dossier and evidence files.
             </div>
           )}
+          </div>
         </div>
       )}
 

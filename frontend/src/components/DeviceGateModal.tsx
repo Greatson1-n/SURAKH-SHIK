@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { AlertTriangle, ShieldCheck, Key, RefreshCw } from "lucide-react";
-import { api, setDeviceToken } from "../services/api";
+import { AlertTriangle, ShieldCheck, Key, RefreshCw, Laptop } from "lucide-react";
+import { api, setDeviceToken, getDeviceAssetTag } from "../services/api";
 
 interface DeviceGateModalProps {
   deviceToken: string;
@@ -10,9 +10,9 @@ interface DeviceGateModalProps {
 
 export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, isAuthorized, onDeviceUpdated }) => {
   const [showEnroll, setShowEnroll] = useState(false);
-  const [assetTag, setAssetTag] = useState("MHA-SECURE-DELL-5420-FIELD");
-  const [station, setStation] = useState("City Police Station (Manipur)");
-  const role = "INVESTIGATING_OFFICER";
+  const [assetTag, setAssetTag] = useState(getDeviceAssetTag());
+  const [station, setStation] = useState("Departmental Field Operations");
+  const role = "FIELD_OFFICER";
   const [customToken, setCustomToken] = useState(deviceToken);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -22,15 +22,15 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
     setLoading(true);
     setErrorMsg("");
     try {
-      const generatedToken = customToken || `DEV-${Date.now()}`;
+      const targetToken = customToken.trim() || deviceToken;
       await api.enrollDevice({
-        device_id: generatedToken,
+        device_id: targetToken,
         asset_tag: assetTag,
         assigned_station: station,
         assigned_role: role,
       });
-      setDeviceToken(generatedToken);
-      onDeviceUpdated(generatedToken);
+      setDeviceToken(targetToken);
+      onDeviceUpdated(targetToken);
       setShowEnroll(false);
     } catch (err: any) {
       setErrorMsg(err.message || "Device enrollment failed.");
@@ -39,16 +39,12 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
     }
   };
 
-  const handleSwitchToSimulatedUnregistered = () => {
-    const untrustedToken = "UNAUTHORIZED-HOME-PC-999";
-    setDeviceToken(untrustedToken);
-    onDeviceUpdated(untrustedToken);
-  };
-
-  const handleRestoreAuthorized = () => {
-    const masterToken = "MHA-SECURE-STATION-DEV-001";
-    setDeviceToken(masterToken);
-    onDeviceUpdated(masterToken);
+  const handleGenerateNewHardwareToken = () => {
+    const randTag = Math.random().toString(36).substring(2, 6).toUpperCase() + "-" + Math.random().toString(36).substring(2, 6).toUpperCase();
+    const newToken = `MHA-DEV-LAPTOP-${randTag}`;
+    setDeviceToken(newToken);
+    setCustomToken(newToken);
+    onDeviceUpdated(newToken);
   };
 
   if (isAuthorized && !showEnroll) {
@@ -58,7 +54,7 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
         bottom: "16px",
         left: "16px",
         zIndex: 50,
-        background: "rgba(12, 31, 56, 0.9)",
+        background: "rgba(12, 31, 56, 0.92)",
         border: "1px solid var(--border-bright)",
         borderRadius: "var(--radius-md)",
         padding: "8px 14px",
@@ -72,14 +68,9 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
         <span style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>
           Hardware Bound: <strong style={{ color: "#38bdf8" }}>{deviceToken}</strong>
         </span>
-        <button 
-          className="btn btn-secondary" 
-          style={{ padding: "3px 8px", fontSize: "0.72rem" }}
-          onClick={handleSwitchToSimulatedUnregistered}
-          title="Demonstrate security block when accessed from an unregistered personal laptop"
-        >
-          Simulate Untrusted Laptop
-        </button>
+        <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginLeft: "4px" }}>
+          ({getDeviceAssetTag()})
+        </span>
       </div>
     );
   }
@@ -103,7 +94,7 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
             </div>
             <div>
               <h2 style={{ fontSize: "1.25rem", color: "#f87171" }}>
-                Unauthorized Terminal Detected
+                Terminal Kill Switch Activated / Unauthorized Machine
               </h2>
               <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
                 Zero-Trust Hardware Binding Enforcement (Section 66 IT Act)
@@ -115,7 +106,7 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
             <p style={{ fontSize: "0.86rem", color: "#e2e8f0", lineHeight: 1.6 }}>
               Access to <strong>SURAKH-SHIK</strong> is strictly restricted to departmentally verified, 
               hardware-bound workstations. The device token presented (<code className="mono" style={{ color: "#fca5a5" }}>{deviceToken}</code>) 
-              is <strong>NOT AUTHORIZED</strong> in the National Crime Records Bureau directory.
+              has either been <strong>REMOTELY REVOKED</strong> by IT Administration or has not been recognized.
             </p>
           </div>
 
@@ -128,25 +119,25 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
           {!showEnroll ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               <button 
-                className="btn btn-primary"
-                onClick={handleRestoreAuthorized}
+                className="btn btn-secondary"
+                onClick={handleGenerateNewHardwareToken}
               >
-                <ShieldCheck size={18} />
-                Switch to Authorized Pre-Seeded Laptop (MHA-SECURE-STATION-DEV-001)
+                <Laptop size={18} color="#38bdf8" />
+                Regenerate Machine Hardware Token (Fresh Connection)
               </button>
               
               <button 
-                className="btn btn-secondary"
+                className="btn btn-primary"
                 onClick={() => setShowEnroll(true)}
               >
                 <Key size={18} />
-                Enroll Current Workstation (Admin Provisioning)
+                Enroll Current Workstation (Departmental Authorization)
               </button>
             </div>
           ) : (
             <form onSubmit={handleEnroll}>
               <div style={{ marginBottom: "14px" }}>
-                <label className="gov-label">Asset Tag / Serial Number</label>
+                <label className="gov-label">Asset Tag / Workstation Profile</label>
                 <input 
                   type="text" 
                   className="gov-input" 
@@ -157,7 +148,7 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
               </div>
 
               <div style={{ marginBottom: "14px" }}>
-                <label className="gov-label">Assigned Police Station / Unit</label>
+                <label className="gov-label">Assigned Police Station / Laboratory</label>
                 <input 
                   type="text" 
                   className="gov-input" 
@@ -192,7 +183,7 @@ export const DeviceGateModal: React.FC<DeviceGateModalProps> = ({ deviceToken, i
                   disabled={loading}
                 >
                   {loading ? <RefreshCw className="animate-spin" size={16} /> : <ShieldCheck size={16} />}
-                  Authorize Device
+                  Authorize Workstation
                 </button>
               </div>
             </form>
