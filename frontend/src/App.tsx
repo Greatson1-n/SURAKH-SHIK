@@ -35,6 +35,7 @@ export const App: React.FC = () => {
     fullName: string;
     role: string;
     photoUrl: string;
+    isEnrolled?: boolean;
   } | null>(null);
 
   // Initial check: Device verification + Active Session verification
@@ -128,13 +129,14 @@ export const App: React.FC = () => {
 
     try {
       const res = await api.loginStep1(badgeId, password);
-      if (res.status === "NEED_FACE_2FA") {
+      if (res.status === "NEED_FACE_2FA" || res.status === "NEED_FACE_ENROLLMENT") {
         setFace2faData({
           tempToken: res.temp_token,
           badgeId: res.badge_id,
           fullName: res.full_name,
           role: res.role,
           photoUrl: res.photo_url,
+          isEnrolled: res.is_enrolled,
         });
       }
     } catch (err: any) {
@@ -390,6 +392,7 @@ export const App: React.FC = () => {
           fullName={face2faData.fullName}
           role={face2faData.role}
           photoUrl={face2faData.photoUrl}
+          isEnrolled={face2faData.isEnrolled}
           onSuccess={handleFaceSuccess}
           onCancel={() => setFace2faData(null)}
         />

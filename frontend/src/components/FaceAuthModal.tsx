@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { Camera, CheckCircle2, XCircle, ShieldCheck, RefreshCw } from "lucide-react";
+import { Camera, CheckCircle2, XCircle, ShieldCheck, RefreshCw, UserCheck } from "lucide-react";
 import { api, API_BASE } from "../services/api";
 
 interface FaceAuthModalProps {
@@ -8,6 +8,7 @@ interface FaceAuthModalProps {
   fullName: string;
   role: string;
   photoUrl: string;
+  isEnrolled?: boolean;
   onSuccess: (authData: any) => void;
   onCancel: () => void;
 }
@@ -17,12 +18,14 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
   badgeId,
   fullName,
   photoUrl,
+  isEnrolled = false,
   onSuccess,
   onCancel,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [cameraError, setCameraError] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [mode, setMode] = useState<"VERIFY" | "ENROLL">(!isEnrolled ? "ENROLL" : "VERIFY");
   const [verificationResult, setVerificationResult] = useState<{
     success: boolean;
     confidence: number;
@@ -72,7 +75,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
     }
   };
 
-  const handleLiveVerification = async () => {
+  const handleAction = async () => {
     setIsVerifying(true);
     setVerificationResult(null);
 
@@ -82,20 +85,23 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
         setVerificationResult({
           success: false,
           confidence: 0,
-          reason: "Live camera stream unavailable. Please ensure webcam permission is granted.",
+          reason: "Live camera stream unavailable. Please grant webcam permissions.",
         });
         setIsVerifying(false);
         return;
       }
 
-      // Transmit live frame to real optical biometric comparison engine
+      const isEnrollmentAction = mode === "ENROLL";
+
+      // Transmit live frame to backend
       const res = await api.loginStep2Face({
         temp_token: tempToken,
         live_photo_b64: capturedFrame,
         liveness_verified: true,
+        is_enrollment: isEnrollmentAction,
       });
 
-      const matchConf = res.match_confidence ?? 88.5;
+      const matchConf = res.match_confidence ?? 100.0;
       setVerificationResult({
         success: true,
         confidence: matchConf,
@@ -108,7 +114,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
       setVerificationResult({
         success: false,
         confidence: 0,
-        reason: err.message || "Face verification failed. The live face does not match the enrolled departmental record.",
+        reason: err.message || (mode === "ENROLL" ? "Face enrollment failed." : "Face verification failed. Live face does not match the enrolled template."),
       });
     } finally {
       setIsVerifying(false);
@@ -128,17 +134,21 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
           background: "rgba(10, 25, 47, 0.5)"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <Camera size={22} color="#38bdf8" />
+            <Camera size={22} color={mode === "ENROLL" ? "#10b981" : "#38bdf8"} />
             <div>
               <h3 style={{ fontSize: "1.05rem", color: "#f8fafc" }}>
-                Stage 2: Mandatory 2FA Face Biometrics
+                {mode === "ENROLL" ? "Initial Biometric Registration (Trust-On-First-Use)" : "Stage 2: Mandatory 2FA Face Biometrics"}
               </h3>
               <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                Live Facial Verification Against Enrolled Departmental Record
+                {mode === "ENROLL" 
+                  ? "Center your face in the reticle to enroll your official biometric profile." 
+                  : "Live Facial Verification Against Enrolled Departmental Record"}
               </p>
             </div>
           </div>
-          <span className="gov-badge badge-blue">Zero-Trust Identity</span>
+          <span className={`gov-badge ${mode === "ENROLL" ? "badge-green" : "badge-blue"}`}>
+            {mode === "ENROLL" ? "Zero-Trust Enrollment" : "2FA Active"}
+          </span>
         </div>
 
         {/* Modal Body */}
@@ -174,7 +184,7 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
               {/* Reticle Overlay */}
               {!cameraError && (
                 <div className="scanner-overlay">
-                  <div className="scanner-reticle">
+                  <div className="scanner-reticle" style={{ borderColor: mode === "ENROLL" ? "#10b981" : "#38bdf8" }}>
                     <div className="scanline"></div>
                   </div>
                 </div>
@@ -195,7 +205,12 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
                 fontSize: "0.74rem",
                 color: "#94a3b8"
               }}>
-                <span>Optical Match Engine: <strong style={{ color: "#38bdf8" }}>Active</strong></span>
+                <span>
+                  {mode === "ENROLL" ? "Registration Mode: " : "Optical Match Engine: "}
+                  <strong style={{ color: mode === "ENROLL" ? "#10b981" : "#38bdf8" }}>
+                    {mode === "ENROLL" ? "Capturing Real Face" : "Background Independent"}
+                  </strong>
+                </span>
                 <span className="mono" style={{ color: "#10b981" }}>FEED LIVE 30FPS</span>
               </div>
             </div>
@@ -212,25 +227,35 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
               textAlign: "center"
             }}>
               <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", marginBottom: "8px" }}>
-                Enrolled Record
+                {mode === "ENROLL" ? "New Profile" : "Enrolled Record"}
               </span>
               <div style={{
                 width: "110px",
                 height: "135px",
                 borderRadius: "6px",
-                border: "2px solid #2563eb",
+                border: `2px solid ${mode === "ENROLL" ? "#10b981" : "#2563eb"}`,
                 overflow: "hidden",
                 marginBottom: "8px",
-                background: "#020617"
+                background: "#020617",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
               }}>
-                <img
-                  src={`${API_BASE}${photoUrl}`}
-                  alt="Enrolled Departmental Record"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  onError={(e: any) => {
-                    e.target.src = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300";
-                  }}
-                />
+                {mode === "ENROLL" ? (
+                  <div style={{ padding: "10px", textAlign: "center", color: "var(--text-secondary)" }}>
+                    <UserCheck size={36} color="#10b981" style={{ margin: "0 auto 6px" }} />
+                    <span style={{ fontSize: "0.68rem" }}>First Face Capture</span>
+                  </div>
+                ) : (
+                  <img
+                    src={`${API_BASE}${photoUrl}`}
+                    alt="Enrolled Departmental Record"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    onError={(e: any) => {
+                      e.target.src = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300";
+                    }}
+                  />
+                )}
               </div>
               <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#f8fafc" }}>
                 {fullName}
@@ -238,6 +263,42 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
               <div className="mono" style={{ fontSize: "0.68rem", color: "#38bdf8" }}>
                 {badgeId}
               </div>
+
+              {/* Toggle to Re-Enroll */}
+              {mode === "VERIFY" ? (
+                <button
+                  type="button"
+                  onClick={() => setMode("ENROLL")}
+                  style={{
+                    marginTop: "10px",
+                    background: "transparent",
+                    border: "none",
+                    color: "#38bdf8",
+                    fontSize: "0.68rem",
+                    cursor: "pointer",
+                    textDecoration: "underline"
+                  }}
+                  title="Capture and register your new real face template"
+                >
+                  Re-Enroll My Face
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setMode("VERIFY")}
+                  style={{
+                    marginTop: "10px",
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--text-muted)",
+                    fontSize: "0.68rem",
+                    cursor: "pointer",
+                    textDecoration: "underline"
+                  }}
+                >
+                  Back to Verify
+                </button>
+              )}
             </div>
           </div>
 
@@ -260,11 +321,15 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
               )}
               <div>
                 <div style={{ fontSize: "0.86rem", fontWeight: 700, color: verificationResult.success ? "#6ee7b7" : "#fca5a5" }}>
-                  {verificationResult.success ? `Biometric Match Confirmed (${verificationResult.confidence.toFixed(1)}%)` : "Authentication Denied"}
+                  {verificationResult.success
+                    ? mode === "ENROLL" ? "Biometric Profile Registered & Authenticated!" : `Biometric Match Confirmed (${verificationResult.confidence.toFixed(1)}%)`
+                    : "Authentication Denied"}
                 </div>
                 <div style={{ fontSize: "0.76rem", color: "var(--text-secondary)" }}>
                   {verificationResult.success
-                    ? "Live facial vectors verified against enrolled departmental record. Initializing secure terminal session..."
+                    ? mode === "ENROLL"
+                      ? "Live face template permanently enrolled into Sovereign Vault. Starting session..."
+                      : "Live facial vectors verified against enrolled departmental record. Starting session..."
                     : verificationResult.reason}
                 </div>
               </div>
@@ -284,19 +349,20 @@ export const FaceAuthModal: React.FC<FaceAuthModalProps> = ({
 
             <button
               type="button"
-              className="btn btn-primary"
-              onClick={handleLiveVerification}
+              className={mode === "ENROLL" ? "btn btn-primary" : "btn btn-primary"}
+              style={mode === "ENROLL" ? { background: "linear-gradient(135deg, #059669 0%, #10b981 100%)", borderColor: "#10b981" } : {}}
+              onClick={handleAction}
               disabled={isVerifying}
             >
               {isVerifying ? (
                 <>
                   <RefreshCw className="animate-spin" size={16} />
-                  Analyzing Biometric Match...
+                  {mode === "ENROLL" ? "Registering Biometric Face..." : "Analyzing Biometric Match..."}
                 </>
               ) : (
                 <>
-                  <ShieldCheck size={18} />
-                  Verify &amp; Authenticate
+                  {mode === "ENROLL" ? <UserCheck size={18} /> : <ShieldCheck size={18} />}
+                  {mode === "ENROLL" ? "Enroll Face & Authenticate" : "Verify Face & Authenticate"}
                 </>
               )}
             </button>

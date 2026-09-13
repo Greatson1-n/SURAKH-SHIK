@@ -61,16 +61,19 @@ def init_db():
         photo_path TEXT NOT NULL,
         photo_b64 TEXT,
         device_token TEXT,
+        is_biometric_enrolled INTEGER DEFAULT 0,
         is_active INTEGER DEFAULT 1,
         created_at TEXT NOT NULL
     );
     """)
 
-    # Safe migration: ensure photo_b64 exists if table was pre-existing
+    # Safe migration: ensure photo_b64 and is_biometric_enrolled exist if table was pre-existing
     cursor.execute("PRAGMA table_info(users);")
     cols = [r["name"] for r in cursor.fetchall()]
     if "photo_b64" not in cols:
         cursor.execute("ALTER TABLE users ADD COLUMN photo_b64 TEXT;")
+    if "is_biometric_enrolled" not in cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_biometric_enrolled INTEGER DEFAULT 0;")
 
     # 2. Authorized Departmental Devices (Hardware Binding)
     cursor.execute("""
@@ -294,8 +297,8 @@ def seed_initial_data(conn: sqlite3.Connection):
         if not cursor.fetchone():
             cursor.execute(
                 """INSERT INTO users 
-                (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, device_token, is_active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, device_token, is_biometric_enrolled, is_active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
                 (
                     u.get("badge_id"),
                     u.get("full_name"),
@@ -308,6 +311,7 @@ def seed_initial_data(conn: sqlite3.Connection):
                     u.get("photo_path"),
                     u.get("photo_b64"),
                     u.get("device_token", "MHA-SECURE-STATION-DEV-001"),
+                    1 if u.get("is_biometric_enrolled") else 0,
                     u.get("is_active", 1),
                     u.get("created_at")
                 )

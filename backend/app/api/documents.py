@@ -43,8 +43,8 @@ async def upload_document(
     doc_id = f"DOC-{uuid.uuid4().hex[:10].upper()}"
 
     # 1. OCR & Privacy Redaction Pipeline
-    extracted_text = LegalOCRAndRedactionPipeline.extract_text_from_bytes(file_bytes, file.filename)
-    ocr_result = LegalOCRAndRedactionPipeline.process_and_redact(extracted_text)
+    extracted_text, ocr_engine, ocr_conf = LegalOCRAndRedactionPipeline.extract_text_from_bytes(file_bytes, file.filename)
+    ocr_result = LegalOCRAndRedactionPipeline.process_and_redact(extracted_text, ocr_engine=ocr_engine, confidence=ocr_conf)
 
     # 2. Encrypt with unique AES-256-GCM DEK
     dek = generate_dek()
@@ -106,13 +106,23 @@ async def upload_document(
     return {
         "status": "SUCCESS",
         "document_id": doc_id,
+        "file_name": file.filename,
+        "file_type": file_type,
         "content_hash": raw_hash,
         "ledger_block": ledger_res["block_number"],
         "ledger_tx": ledger_res["tx_id"],
         "ocr": {
+            "ocr_engine": ocr_result["ocr_engine"],
+            "ocr_confidence": ocr_result["ocr_confidence"],
+            "word_count": ocr_result["word_count"],
+            "char_count": ocr_result["char_count"],
             "pii_detected": ocr_result["detected_pii_count"],
+            "detected_entities": ocr_result["detected_entities"],
             "is_redacted": ocr_result["is_redacted"],
-            "merkle_root": ocr_result["merkle_root"]
+            "extracted_text": ocr_result["original_text"],
+            "redacted_text": ocr_result["redacted_text"],
+            "merkle_root": ocr_result["merkle_root"],
+            "leaf_count": ocr_result["leaf_count"]
         }
     }
 
@@ -174,6 +184,8 @@ def view_document(doc_id: str, user: dict = Depends(get_current_user_token), dev
     # (e.g., Defense or Public Prosecutor sees redacted by default; IO/Judge sees toggleable)
     display_text = doc["redacted_text"] if doc["is_redacted"] else doc["extracted_text"]
     
+    ocr_details = LegalOCRAndRedactionPipeline.process_and_redact(doc["extracted_text"] or "")
+
     return {
         "document_id": doc["document_id"],
         "case_id": doc["case_id"],
@@ -185,6 +197,7 @@ def view_document(doc_id: str, user: dict = Depends(get_current_user_token), dev
         "extracted_text": doc["extracted_text"],
         "redacted_text": doc["redacted_text"],
         "is_redacted": bool(doc["is_redacted"]),
+        "ocr": ocr_details,
         "viewer_watermark": {
             "officer_badge": user.get("sub"),
             "officer_name": user.get("full_name"),

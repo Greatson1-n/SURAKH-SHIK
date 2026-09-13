@@ -77,6 +77,7 @@ export const api = {
     live_photo_b64?: string;
     face_match_confidence?: number;
     liveness_verified?: boolean;
+    is_enrollment?: boolean;
   }) => {
     const res = await fetch(`${API_BASE}/api/auth/login-step2-face`, {
       method: "POST",
@@ -86,6 +87,19 @@ export const api = {
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.detail?.reason || "Face verification failed.");
+    }
+    return res.json();
+  },
+
+  reEnrollFace: async (live_photo_b64: string) => {
+    const res = await fetch(`${API_BASE}/api/auth/re-enroll-face`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ live_photo_b64 }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Biometric re-enrollment failed.");
     }
     return res.json();
   },
