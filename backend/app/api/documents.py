@@ -94,6 +94,15 @@ async def upload_document(
         )
     )
 
+    # Statutory Scrutiny (BNSS Sec 173): New evidence file requires SHO/SP review before inter-agency sharing
+    cursor.execute(
+        """UPDATE cases 
+        SET sho_approval_status = 'PENDING_REVIEW',
+            sho_remarks = 'New investigative evidence attached by IO; awaiting SHO / SP scrutiny and fake-case check.'
+        WHERE case_id = ?;""",
+        (case_id,)
+    )
+
     # Audit log
     cursor.execute(
         """INSERT INTO audit_logs (log_id, actor_badge, actor_role, action, target_ref, ip_address, device_id, timestamp, signature)
@@ -336,10 +345,34 @@ def view_document(doc_id: str, user: dict = Depends(get_current_user_token), dev
     conn.commit()
     conn.close()
 
-    # Determine if user receives redacted text or full text
-    # (e.g., Defense or Public Prosecutor sees redacted by default; IO/Judge sees toggleable)
-    display_text = doc["redacted_text"] if doc["is_redacted"] else doc["extracted_text"]
-    
+    # Determine MIME type and encode decrypted raw bytes
+    file_name = doc["file_name"] or ""
+    lower_fn = file_name.lower()
+    if lower_fn.endswith((".jpg", ".jpeg")):
+        mime_type = "image/jpeg"
+    elif lower_fn.endswith(".png"):
+        mime_type = "image/png"
+    elif lower_fn.endswith(".webp"):
+        mime_type = "image/webp"
+    elif lower_fn.endswith(".gif"):
+        mime_type = "image/gif"
+    elif lower_fn.endswith(".pdf"):
+        mime_type = "application/pdf"
+    elif lower_fn.endswith((".txt", ".log", ".csv")):
+        mime_type = "text/plain"
+    elif lower_fn.endswith(".json"):
+        mime_type = "application/json"
+    else:
+        if plaintext.startswith(b"\xff\xd8\xff"):
+            mime_type = "image/jpeg"
+        elif plaintext.startswith(b"\x89PNG\r\n\x1a\n"):
+            mime_type = "image/png"
+        elif plaintext.startswith(b"%PDF"):
+            mime_type = "application/pdf"
+        else:
+            mime_type = "application/octet-stream"
+
+    raw_file_b64 = base64.b64encode(plaintext).decode("utf-8")
     ocr_details = LegalOCRAndRedactionPipeline.process_and_redact(doc["extracted_text"] or "")
 
     return {
@@ -352,6 +385,9 @@ def view_document(doc_id: str, user: dict = Depends(get_current_user_token), dev
         "created_at": doc["created_at"],
         "extracted_text": doc["extracted_text"],
         "redacted_text": doc["redacted_text"],
+        "raw_file_b64": raw_file_b64,
+        "mime_type": mime_type,
+        "file_size_bytes": len(plaintext),
         "is_redacted": bool(doc["is_redacted"]),
         "ocr": ocr_details,
         "viewer_watermark": {

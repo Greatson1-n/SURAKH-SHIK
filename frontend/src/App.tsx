@@ -46,7 +46,20 @@ export const App: React.FC = () => {
       const devRes = await api.checkDeviceStatus(deviceToken);
       setIsDeviceAuthorized(devRes.authorized);
 
-      // 2. If token exists and device is valid, fetch user
+      // 2. Pre-Login Cloud Cold-Restart Auto-Reconcile
+      try {
+        const savedRaw = localStorage.getItem("SURAKH_SAVED_OFFICERS");
+        if (savedRaw) {
+          const savedOfficers = JSON.parse(savedRaw);
+          if (Array.isArray(savedOfficers) && savedOfficers.length > 0) {
+            await api.reconcileUsers(savedOfficers);
+          }
+        }
+      } catch (recErr) {
+        console.warn("Pre-login auto-reconciliation note:", recErr);
+      }
+
+      // 3. If token exists and device is valid, fetch user
       const token = getAuthToken();
       if (token && devRes.authorized) {
         try {
@@ -99,14 +112,12 @@ export const App: React.FC = () => {
         setInactivityNotice(
           "SESSION EXPIRED: You were automatically logged out due to 15 minutes of inactivity in compliance with National Cyber Security Standards (RAM keys zeroized)."
         );
-      } else if (elapsed >= (INACTIVITY_TIMEOUT_MS - WARNING_BEFORE_TIMEOUT_MS)) {
-        // Show 60-second warning modal
-        const secondsRemaining = Math.max(0, Math.ceil((INACTIVITY_TIMEOUT_MS - elapsed) / 1000));
-        setWarningSeconds(secondsRemaining);
+      } else if (elapsed >= INACTIVITY_TIMEOUT_MS - WARNING_BEFORE_TIMEOUT_MS) {
+        // Show 60-Second Warning Banner
+        const remainingSec = Math.max(1, Math.ceil((INACTIVITY_TIMEOUT_MS - elapsed) / 1000));
+        setWarningSeconds(remainingSec);
       } else {
-        if (warningSeconds !== null) {
-          setWarningSeconds(null);
-        }
+        if (warningSeconds !== null) setWarningSeconds(null);
       }
     }, 1000);
 
@@ -120,15 +131,41 @@ export const App: React.FC = () => {
     setDeviceTokenState(newToken);
   };
 
-  // Step 1: Submit Credentials
+  // Step 1: Submit Credentials with Auto-Recovery
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
     setLoginError(null);
     setInactivityNotice(null);
 
+    const cleanBadge = badgeId.trim();
+
     try {
-      const res = await api.loginStep1(badgeId, password);
+      let res;
+      try {
+        res = await api.loginStep1(cleanBadge, password);
+      } catch (firstAttemptErr: any) {
+        // Cold-Restart Recovery: If login failed, check if account exists in browser backup
+        const savedRaw = localStorage.getItem("SURAKH_SAVED_OFFICERS");
+        if (savedRaw) {
+          try {
+            const list = JSON.parse(savedRaw);
+            const found = list.find((x: any) => x.badge_id?.toLowerCase() === cleanBadge.toLowerCase());
+            if (found) {
+              await api.reconcileUsers([found]);
+              // Retry login after on-the-fly reconciliation
+              res = await api.loginStep1(cleanBadge, password);
+            } else {
+              throw firstAttemptErr;
+            }
+          } catch {
+            throw firstAttemptErr;
+          }
+        } else {
+          throw firstAttemptErr;
+        }
+      }
+
       if (res.status === "NEED_FACE_2FA" || res.status === "NEED_FACE_ENROLLMENT") {
         setFace2faData({
           tempToken: res.temp_token,

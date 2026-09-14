@@ -190,7 +190,7 @@ export const AdminDashboard: React.FC = () => {
         fd.append("photo", photoFile);
       }
 
-      await api.createUser(fd);
+      const createRes = await api.createUser(fd);
       const enrollmentNote = photoFile 
         ? "with official photo template." 
         : "with webcam live enrollment on first login (TOFU).";
@@ -203,7 +203,7 @@ export const AdminDashboard: React.FC = () => {
       try {
         const savedRaw = localStorage.getItem("SURAKH_SAVED_OFFICERS");
         const list = savedRaw ? JSON.parse(savedRaw) : [];
-        const newOfficer = {
+        const newOfficer = createRes.user || {
           badge_id: badgeId.trim(),
           full_name: fullName.trim(),
           role: currentRole,
@@ -211,6 +211,7 @@ export const AdminDashboard: React.FC = () => {
           state: selectedState,
           district: selectedDistrict,
           station_id: stationId,
+          password: password,
           is_biometric_enrolled: photoFile ? 1 : 0,
           is_active: 1
         };

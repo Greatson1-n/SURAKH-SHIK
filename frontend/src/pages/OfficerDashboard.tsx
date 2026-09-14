@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { 
   Folder, FilePlus, Share2, Shield, Upload, FileText, Lock, Eye, 
   RefreshCw, CheckCircle2, ShieldCheck, AlertTriangle, Sparkles,
-  MapPin, Building2, UserCheck, Search, X
+  MapPin, Building2, UserCheck, Search, X, Clock
 } from "lucide-react";
 import { api } from "../services/api";
 import { WatermarkViewer } from "../components/WatermarkViewer";
@@ -52,6 +52,16 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
   const [shareRemarks, setShareRemarks] = useState("");
   const [shareMsg, setShareMsg] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+
+  // SHO / SP Supervisory Scrutiny Desk (BNSS Sec 173)
+  const [showShoModal, setShowShoModal] = useState(false);
+  const [shoAction, setShoAction] = useState<"APPROVE" | "REQUEST_REVIEW">("APPROVE");
+  const [shoRemarks, setShoRemarks] = useState("");
+  const [shoSubmitting, setShoSubmitting] = useState(false);
+  const [shoModalMsg, setShoModalMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  // Evidence Transmission Format for Targeted Sharing
+  const [dispatchContentMode, setDispatchContentMode] = useState<"BOTH" | "RAW_ONLY" | "OCR_ONLY">("BOTH");
 
   const targetDistrictList = INDIA_DISTRICTS[targetState] || [];
   const availableFacilities = getDepartmentFacilities(targetState, targetDistrict, targetDeptId);
@@ -258,6 +268,7 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
         target_dept: targetDeptId,
         target_role: targetRole,
         statutory_purpose: statutoryPurpose,
+        content_mode: dispatchContentMode,
         remarks: shareRemarks || statutoryPurpose,
       });
       setShareMsg(`Targeted access granted to ${res.recipient}. Digital custody transfer recorded on Ledger Block #${res.ledger_block}.`);
@@ -270,6 +281,36 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
       alert(err.message || "Sharing failed.");
     } finally {
       setSharing(false);
+    }
+  };
+
+  const handleShoReviewSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCaseId) return;
+    setShoSubmitting(true);
+    setShoModalMsg(null);
+    try {
+      await api.reviewCase(selectedCaseId, {
+        action: shoAction,
+        remarks: shoRemarks.trim() || (shoAction === "APPROVE" ? "Case and evidence verified genuine under BNSS Sec 173." : "Revision requested by SHO."),
+        is_genuine: shoAction === "APPROVE"
+      });
+      setShoModalMsg({
+        text: shoAction === "APPROVE" 
+          ? "Case certified genuine under BNSS Sec 173. Inter-agency targeted sharing is now UNLOCKED."
+          : "Case marked 'REVIEW_REQUESTED'. Revision remarks dispatched to investigating officer. Inter-agency sharing remains LOCKED.",
+        type: "success"
+      });
+      setTimeout(() => {
+        setShowShoModal(false);
+        setShoModalMsg(null);
+        fetchCases();
+        handleSelectCase(selectedCaseId);
+      }, 1800);
+    } catch (err: any) {
+      setShoModalMsg({ text: err.message || "Failed to submit supervisory review.", type: "error" });
+    } finally {
+      setShoSubmitting(false);
     }
   };
 
@@ -512,9 +553,21 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
                       <span className="mono" style={{ fontSize: "0.82rem", fontWeight: 700, color: "#38bdf8" }}>
                         {c.fir_number}
                       </span>
-                      <span className="gov-badge badge-gold" style={{ fontSize: "0.65rem" }}>
-                        {c.status}
-                      </span>
+                      <div style={{ display: "flex", gap: "4px" }}>
+                        {c.sho_approval_status === "APPROVED" ? (
+                          <span className="gov-badge badge-green" style={{ fontSize: "0.62rem" }}>
+                            ✅ SHO Approved
+                          </span>
+                        ) : c.sho_approval_status === "REVIEW_REQUESTED" ? (
+                          <span className="gov-badge badge-red" style={{ fontSize: "0.62rem" }}>
+                            ⚠️ Review Needed
+                          </span>
+                        ) : (
+                          <span className="gov-badge badge-gold" style={{ fontSize: "0.62rem" }}>
+                            ⏳ Awaiting SHO
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div style={{ fontSize: "0.88rem", fontWeight: 600, color: "#f8fafc", marginBottom: "4px" }}>
                       {c.title}
@@ -532,7 +585,7 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
           {caseDetails ? (
             <div className="gov-card">
               {/* Dossier Header */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", paddingBottom: "16px", borderBottom: "1px solid var(--border-subtle)", marginBottom: "20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", paddingBottom: "16px", borderBottom: "1px solid var(--border-subtle)", marginBottom: "16px" }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
                     <span className="mono" style={{ fontSize: "1.25rem", fontWeight: 800, color: "#38bdf8" }}>
@@ -552,13 +605,26 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
                 </div>
 
                 <div style={{ display: "flex", gap: "10px" }}>
-                  <button 
-                    className="btn btn-secondary"
-                    onClick={() => setShowShareModal(true)}
-                  >
-                    <Share2 size={16} color="#eab308" />
-                    Targeted Sharing
-                  </button>
+                  {caseDetails.case.sho_approval_status === "APPROVED" ? (
+                    <button 
+                      className="btn btn-secondary"
+                      onClick={() => setShowShareModal(true)}
+                      style={{ borderColor: "#10b981", color: "#34d399" }}
+                    >
+                      <Share2 size={16} color="#10b981" />
+                      Targeted Sharing (Unlocked)
+                    </button>
+                  ) : (
+                    <button 
+                      className="btn btn-secondary"
+                      disabled
+                      style={{ opacity: 0.6, cursor: "not-allowed" }}
+                      title="Targeted Sharing is strictly locked until the Station House Officer (SHO) or SP certifies and approves the case under BNSS Sec 173."
+                    >
+                      <Lock size={16} color="#f87171" />
+                      Targeted Sharing (Locked by SHO)
+                    </button>
+                  )}
 
                   <button 
                     className="btn btn-primary"
@@ -568,6 +634,105 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
                     Secure Evidence File
                   </button>
                 </div>
+              </div>
+
+              {/* SUPERVISORY SCRUTINY & QUALITY CONTROL DESK (BNSS SEC 173) */}
+              <div style={{
+                marginBottom: "20px",
+                padding: "14px 18px",
+                borderRadius: "var(--radius-md)",
+                background: caseDetails.case.sho_approval_status === "APPROVED"
+                  ? "rgba(16, 185, 129, 0.08)"
+                  : caseDetails.case.sho_approval_status === "REVIEW_REQUESTED"
+                  ? "rgba(239, 68, 68, 0.1)"
+                  : "rgba(245, 158, 11, 0.08)",
+                border: `1px solid ${
+                  caseDetails.case.sho_approval_status === "APPROVED"
+                    ? "#10b981"
+                    : caseDetails.case.sho_approval_status === "REVIEW_REQUESTED"
+                    ? "#ef4444"
+                    : "#f59e0b"
+                }`,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "12px"
+              }}>
+                <div style={{ flex: 1, minWidth: "280px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "0.85rem" }}>
+                    {caseDetails.case.sho_approval_status === "APPROVED" ? (
+                      <span style={{ color: "#34d399", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <CheckCircle2 size={16} /> Certified Genuine &amp; Approved by SHO/SP (BNSS Sec 173 Compliant)
+                      </span>
+                    ) : caseDetails.case.sho_approval_status === "REVIEW_REQUESTED" ? (
+                      <span style={{ color: "#f87171", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <AlertTriangle size={16} /> Action Required: SHO Sent Back for Review &bull; Inter-Agency Sharing LOCKED
+                      </span>
+                    ) : (
+                      <span style={{ color: "#fbbf24", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <Clock size={16} /> Awaiting Station House Officer (SHO) Scrutiny &amp; Fake-Case Verification
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "0.78rem", color: "#cbd5e1", marginTop: "4px", lineHeight: "1.4" }}>
+                    {caseDetails.case.sho_remarks || "Awaiting supervisory inspection by Station House Officer / SP."}
+                    {caseDetails.case.sho_badge_id && (
+                      <span style={{ marginLeft: "8px", color: "var(--text-muted)" }}>
+                        (Reviewer: <strong style={{ color: "#38bdf8" }}>{caseDetails.case.sho_badge_id}</strong>{caseDetails.case.sho_reviewed_at ? ` at ${caseDetails.case.sho_reviewed_at.substring(0, 16).replace("T", " ")}` : ""})
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* SHO / SP Scrutiny Action Buttons */}
+                {user.role === "STATION_HOUSE_OFFICER" && (
+                  <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                    <button
+                      className="btn"
+                      style={{
+                        background: "#10b981",
+                        color: "#fff",
+                        padding: "6px 12px",
+                        fontSize: "0.76rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        fontWeight: 600
+                      }}
+                      onClick={() => {
+                        setShoAction("APPROVE");
+                        setShoRemarks(caseDetails.case.sho_remarks?.includes("verified genuine") ? caseDetails.case.sho_remarks : "Case and evidentiary dossier verified genuine under BNSS Sec 173.");
+                        setShowShoModal(true);
+                      }}
+                    >
+                      <CheckCircle2 size={14} />
+                      {caseDetails.case.sho_approval_status === "APPROVED" ? "Re-Certify Genuine" : "Approve & Certify Genuine"}
+                    </button>
+
+                    <button
+                      className="btn"
+                      style={{
+                        background: "#ef4444",
+                        color: "#fff",
+                        padding: "6px 12px",
+                        fontSize: "0.76rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        fontWeight: 600
+                      }}
+                      onClick={() => {
+                        setShoAction("REQUEST_REVIEW");
+                        setShoRemarks("");
+                        setShowShoModal(true);
+                      }}
+                    >
+                      <AlertTriangle size={14} />
+                      Send Back for Review
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Attached Evidence & Documents */}
@@ -1231,6 +1396,44 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
                 </div>
               </div>
 
+              {/* STEP 5: EVIDENCE TRANSMISSION FORMAT (RAW VS OCR) */}
+              <div style={{ marginBottom: "16px" }}>
+                <label className="gov-label" style={{ fontSize: "0.75rem", marginBottom: "6px" }}>
+                  Evidence Transmission Format
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+                  <button
+                    type="button"
+                    className={`btn ${dispatchContentMode === "BOTH" ? "btn-primary" : "btn-secondary"}`}
+                    style={{ fontSize: "0.74rem", padding: "8px 6px", textAlign: "center", lineHeight: "1.2" }}
+                    onClick={() => setDispatchContentMode("BOTH")}
+                  >
+                    <div style={{ fontWeight: 700 }}>📦 Complete Dossier</div>
+                    <div style={{ fontSize: "0.68rem", opacity: 0.8, marginTop: "2px" }}>Raw File + OCR Text</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`btn ${dispatchContentMode === "RAW_ONLY" ? "btn-primary" : "btn-secondary"}`}
+                    style={{ fontSize: "0.74rem", padding: "8px 6px", textAlign: "center", lineHeight: "1.2" }}
+                    onClick={() => setDispatchContentMode("RAW_ONLY")}
+                  >
+                    <div style={{ fontWeight: 700 }}>🖼️ Raw Evidence Only</div>
+                    <div style={{ fontSize: "0.68rem", opacity: 0.8, marginTop: "2px" }}>Exact File &amp; Hashes</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`btn ${dispatchContentMode === "OCR_ONLY" ? "btn-primary" : "btn-secondary"}`}
+                    style={{ fontSize: "0.74rem", padding: "8px 6px", textAlign: "center", lineHeight: "1.2" }}
+                    onClick={() => setDispatchContentMode("OCR_ONLY")}
+                  >
+                    <div style={{ fontWeight: 700 }}>📄 OCR Text Only</div>
+                    <div style={{ fontSize: "0.68rem", opacity: 0.8, marginTop: "2px" }}>Redacted Text Dossier</div>
+                  </button>
+                </div>
+              </div>
+
               <div style={{ marginBottom: "14px" }}>
                 <label className="gov-label" style={{ fontSize: "0.75rem" }}>
                   Dispatch Memo / Statutory Reference Letter (Optional)
@@ -1275,6 +1478,9 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
                   <span style={{ background: "rgba(234, 179, 8, 0.15)", color: "#fde047", padding: "2px 8px", borderRadius: "4px" }}>
                     ⏳ {validityDays} Days TTL
                   </span>
+                  <span style={{ background: "rgba(14, 165, 233, 0.15)", color: "#38bdf8", padding: "2px 8px", borderRadius: "4px" }}>
+                    📄 Format: {dispatchContentMode === "BOTH" ? "Complete Package" : dispatchContentMode === "RAW_ONLY" ? "Raw Evidence Only" : "OCR Text Only"}
+                  </span>
                 </div>
               </div>
 
@@ -1285,6 +1491,117 @@ export const OfficerDashboard: React.FC<OfficerDashboardProps> = ({ user }) => {
                 <button type="submit" className="btn btn-primary" disabled={sharing} style={{ background: "linear-gradient(135deg, #eab308, #ca8a04)", color: "#0f172a", fontWeight: 600 }}>
                   {sharing ? <RefreshCw className="animate-spin" size={16} /> : <Share2 size={16} />}
                   Grant Wrapped Key &amp; Log Custody
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SHO / SP SUPERVISORY REVIEW & QUALITY CONTROL */}
+      {showShoModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "580px" }}>
+            <div style={{
+              padding: "18px 24px",
+              borderBottom: "1px solid var(--border-subtle)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{
+                  background: shoAction === "APPROVE" ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                  padding: "8px",
+                  borderRadius: "8px"
+                }}>
+                  {shoAction === "APPROVE" ? <CheckCircle2 size={22} color="#10b981" /> : <AlertTriangle size={22} color="#ef4444" />}
+                </div>
+                <div>
+                  <h3 style={{ fontSize: "1.15rem", margin: 0, color: "#f8fafc" }}>
+                    {shoAction === "APPROVE" ? "Certify Genuine & Approve Case" : "Send Back for Review / Fake Alert"}
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    Station House Officer (SHO) Statutory Oversight under BNSS Sec 173
+                  </p>
+                </div>
+              </div>
+              <button className="btn btn-secondary" style={{ padding: "4px 8px" }} onClick={() => setShowShoModal(false)}>
+                Cancel
+              </button>
+            </div>
+
+            {shoModalMsg && (
+              <div style={{
+                margin: "14px 24px 0",
+                padding: "10px 14px",
+                borderRadius: "var(--radius-md)",
+                fontSize: "0.82rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                background: shoModalMsg.type === "success" ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                color: shoModalMsg.type === "success" ? "#6ee7b7" : "#fca5a5",
+                border: `1px solid ${shoModalMsg.type === "success" ? "#10b981" : "#ef4444"}`
+              }}>
+                {shoModalMsg.type === "success" ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                <span>{shoModalMsg.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleShoReviewSubmit} style={{ padding: "16px 24px 24px" }}>
+              <div style={{
+                background: shoAction === "APPROVE" ? "rgba(16, 185, 129, 0.08)" : "rgba(239, 68, 68, 0.08)",
+                border: `1px solid ${shoAction === "APPROVE" ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"}`,
+                borderRadius: "var(--radius-md)",
+                padding: "12px 14px",
+                marginBottom: "16px",
+                fontSize: "0.8rem",
+                lineHeight: "1.5",
+                color: "#cbd5e1"
+              }}>
+                {shoAction === "APPROVE" ? (
+                  <span>
+                    <strong style={{ color: "#34d399" }}>Statutory Verification (BNSS Sec 173):</strong> As Station House Officer / SP, submitting this certification confirms that the FIR and all attached evidence files have been inspected, checked against fabrication, and certified as authentic. This will <strong>UNLOCK</strong> inter-agency targeted sharing for this case.
+                  </span>
+                ) : (
+                  <span>
+                    <strong style={{ color: "#f87171" }}>Supervisory Action Required:</strong> Marking this case for revision notifies the Investigating Officer of specific evidentiary gaps, lack of corroboration, or suspected fabrication. Targeted sharing will be <strong>STRICTLY LOCKED</strong> until resolved.
+                  </span>
+                )}
+              </div>
+
+              <div style={{ marginBottom: "16px" }}>
+                <label className="gov-label" style={{ fontSize: "0.78rem" }}>
+                  Supervisory Scrutiny Finding / Remarks *
+                </label>
+                <textarea
+                  className="gov-textarea"
+                  style={{ minHeight: "90px", width: "100%", padding: "10px", fontSize: "0.82rem", background: "#020617", border: "1px solid var(--border-subtle)", borderRadius: "4px", color: "#f8fafc" }}
+                  placeholder={shoAction === "APPROVE" ? "e.g. Case inspected; digital evidence hashes corroborated with seizure panchnama. Approved for forensic dispatch." : "e.g. Missing victim statement verification. Re-examine digital timestamps before sending to FSL."}
+                  value={shoRemarks}
+                  onChange={(e) => setShoRemarks(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowShoModal(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn"
+                  disabled={shoSubmitting}
+                  style={{
+                    background: shoAction === "APPROVE" ? "linear-gradient(135deg, #10b981, #059669)" : "linear-gradient(135deg, #ef4444, #dc2626)",
+                    color: "#fff",
+                    fontWeight: 600,
+                    padding: "8px 16px"
+                  }}
+                >
+                  {shoSubmitting ? <RefreshCw className="animate-spin" size={16} /> : (shoAction === "APPROVE" ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />)}
+                  {shoAction === "APPROVE" ? "Certify Genuine & Unlock Sharing" : "Record Deficiency & Lock Sharing"}
                 </button>
               </div>
             </form>

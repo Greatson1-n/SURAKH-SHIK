@@ -127,9 +127,25 @@ def init_db():
         assigned_io_id TEXT NOT NULL,
         status TEXT NOT NULL,
         sensitivity_level TEXT NOT NULL,
+        sho_approval_status TEXT DEFAULT 'PENDING_REVIEW',
+        sho_badge_id TEXT,
+        sho_remarks TEXT,
+        sho_reviewed_at TEXT,
         created_at TEXT NOT NULL
     );
     """)
+
+    # Safe auto-migration for cases table columns
+    cursor.execute("PRAGMA table_info(cases);")
+    existing_case_cols = {row[1] for row in cursor.fetchall()}
+    for col_name, col_type in [
+        ("sho_approval_status", "TEXT DEFAULT 'PENDING_REVIEW'"),
+        ("sho_badge_id", "TEXT"),
+        ("sho_remarks", "TEXT"),
+        ("sho_reviewed_at", "TEXT")
+    ]:
+        if col_name not in existing_case_cols:
+            cursor.execute(f"ALTER TABLE cases ADD COLUMN {col_name} {col_type};")
 
     # 4. Documents Table (AES-256-GCM Encrypted & Hashed)
     cursor.execute("""
@@ -173,6 +189,7 @@ def init_db():
         target_dept TEXT,
         target_role TEXT,
         statutory_purpose TEXT,
+        content_mode TEXT DEFAULT 'BOTH',
         FOREIGN KEY (case_id) REFERENCES cases (case_id)
     );
     """)
@@ -185,7 +202,8 @@ def init_db():
         ("target_district", "TEXT"),
         ("target_dept", "TEXT"),
         ("target_role", "TEXT"),
-        ("statutory_purpose", "TEXT")
+        ("statutory_purpose", "TEXT"),
+        ("content_mode", "TEXT DEFAULT 'BOTH'")
     ]:
         if col_name not in existing_share_cols:
             cursor.execute(f"ALTER TABLE targeted_shares ADD COLUMN {col_name} {col_type};")

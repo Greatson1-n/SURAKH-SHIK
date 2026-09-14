@@ -88,11 +88,17 @@ def list_cases(user: dict = Depends(get_current_user_token), device: str = Depen
     conn.close()
     return {"cases": rows}
 
+class CaseReviewRequest(BaseModel):
+    action: str  # "APPROVE" or "REQUEST_REVIEW"
+    remarks: str
+    is_genuine: bool = True
+
 @router.post("")
 def create_case(payload: CaseCreateRequest, user: dict = Depends(get_current_user_token), device: str = Depends(verify_departmental_device)):
     """
     Register a new criminal investigation case / FIR.
     Automatically assigns State, District, Station, and Branch from the logged-in officer's verified profile.
+    Initializes with PENDING_REVIEW for SHO/SP supervisory fake-case scrutiny.
     """
     if user.get("role") not in ["INVESTIGATING_OFFICER", "STATION_HOUSE_OFFICER"]:
         raise HTTPException(status_code=403, detail="Only Investigating Officers (IO) or SHOs can register cases.")
@@ -105,8 +111,8 @@ def create_case(payload: CaseCreateRequest, user: dict = Depends(get_current_use
 
     cursor.execute(
         """INSERT INTO cases 
-        (case_id, fir_number, title, incident_date, state, district, station_id, branch, assigned_io_id, status, sensitivity_level, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNDER_INVESTIGATION', ?, ?);""",
+        (case_id, fir_number, title, incident_date, state, district, station_id, branch, assigned_io_id, status, sensitivity_level, sho_approval_status, sho_remarks, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNDER_INVESTIGATION', ?, 'PENDING_REVIEW', 'Awaiting SHO / SP Supervisory Verification (Fake Case Check under BNSS Sec 173)', ?);""",
         (
             case_id,
             payload.fir_number,
@@ -137,7 +143,88 @@ def create_case(payload: CaseCreateRequest, user: dict = Depends(get_current_use
         "case_id": case_id,
         "fir_number": payload.fir_number,
         "state": user.get("state"),
-        "station": user.get("station_id")
+        "station": user.get("station_id"),
+        "sho_approval_status": "PENDING_REVIEW"
+    }
+
+@router.post("/{case_id}/sho-review")
+def review_case_by_sho(
+    case_id: str,
+    payload: CaseReviewRequest,
+    user: dict = Depends(get_current_user_token),
+    device: str = Depends(verify_departmental_device)
+):
+    """
+    Station House Officer (SHO) & Superintendent of Police (SP) Supervisory Review Desk.
+    Mandated under BNSS 2023 Sec 173:
+    1. Reviews evidentiary integrity and performs fake-case verification.
+    2. 'APPROVE': Certifies case as genuine; UNLOCKS targeted inter-agency cryptographic sharing.
+    3. 'REQUEST_REVIEW': Flags deficiencies or fabricated evidence; STRICTLY LOCKS sharing.
+    """
+    role = user.get("role")
+    if role not in ["STATION_HOUSE_OFFICER", "SYSTEM_ADMIN"]:
+        raise HTTPException(
+            status_code=403, 
+            detail="Supervisory Clearance Required: Only Station House Officers (SHO) or SPs possess authority to certify case veracity under BNSS Sec 173."
+        )
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM cases WHERE case_id = ?;", (case_id,))
+    case_row = cursor.fetchone()
+    if not case_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Case record not found.")
+
+    # Check jurisdiction: SHO must belong to same State & Station/District (unless admin)
+    if role != "SYSTEM_ADMIN" and (case_row["state"] != user.get("state")):
+        conn.close()
+        raise HTTPException(status_code=403, detail="Jurisdiction Mismatch: You cannot review cases outside your state command.")
+
+    now_str = datetime.now(timezone.utc).isoformat()
+    action_upper = payload.action.upper()
+
+    if action_upper == "APPROVE":
+        new_status = "APPROVED"
+        audit_action = "SUPERVISORY_CASE_APPROVED_GENUINE"
+        default_remarks = payload.remarks or "Case and evidence dossier verified genuine under BNSS Sec 173."
+    elif action_upper == "REQUEST_REVIEW":
+        new_status = "REVIEW_REQUESTED"
+        audit_action = "SUPERVISORY_REVIEW_REQUESTED"
+        default_remarks = payload.remarks or "Revision required: Incomplete or uncorroborated evidence items detected."
+    else:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Invalid action. Must be 'APPROVE' or 'REQUEST_REVIEW'.")
+
+    cursor.execute(
+        """UPDATE cases 
+        SET sho_approval_status = ?, 
+            sho_badge_id = ?, 
+            sho_remarks = ?, 
+            sho_reviewed_at = ? 
+        WHERE case_id = ?;""",
+        (new_status, user.get("sub"), default_remarks, now_str, case_id)
+    )
+
+    # Log to tamper-evident audit trail
+    cursor.execute(
+        """INSERT INTO audit_logs (log_id, actor_badge, actor_role, action, target_ref, ip_address, device_id, timestamp, signature)
+        VALUES (?, ?, ?, ?, ?, '127.0.0.1', ?, ?, 'SIG-SHO-REVIEW');""",
+        (str(uuid.uuid4()), user.get("sub"), user.get("role"), audit_action, f"Case:{case_id} Status:{new_status}", device, now_str)
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "status": "SUCCESS",
+        "case_id": case_id,
+        "sho_approval_status": new_status,
+        "sho_badge_id": user.get("sub"),
+        "sho_remarks": default_remarks,
+        "sho_reviewed_at": now_str,
+        "sharing_unlocked": (new_status == "APPROVED")
     }
 
 @router.get("/{case_id}")

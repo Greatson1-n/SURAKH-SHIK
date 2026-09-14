@@ -31,6 +31,7 @@ class TargetedShareRequest(BaseModel):
     target_dept: Optional[str] = None
     target_role: Optional[str] = None
     statutory_purpose: Optional[str] = None
+    content_mode: Optional[str] = "BOTH"  # "BOTH", "RAW_ONLY", "OCR_ONLY"
 
 class RevokeShareRequest(BaseModel):
     share_id: str
@@ -44,13 +45,14 @@ def grant_targeted_sharing(
     """
     Targeted Cryptographic Sharing:
     Explicitly grants access to a specific external department or role across any Indian State/District.
+    Statutory Guard (BNSS Sec 173): Requires case to be verified and approved by SHO / SP.
     All non-targeted police stations and departments across India remain strictly locked out.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Verify originating case
-    cursor.execute("SELECT state, station_id, fir_number FROM cases WHERE case_id = ?;", (payload.case_id,))
+    # Verify originating case & supervisory approval
+    cursor.execute("SELECT state, station_id, fir_number, sho_approval_status, sho_remarks FROM cases WHERE case_id = ?;", (payload.case_id,))
     case_row = cursor.fetchone()
     if not case_row:
         conn.close()
@@ -61,11 +63,21 @@ def grant_targeted_sharing(
         conn.close()
         raise HTTPException(status_code=403, detail="Permission Denied: You cannot share a case outside your jurisdiction.")
 
+    # Gatekeeper: Strict Enforcement of SHO / SP Supervisory Approval
+    sho_status = case_row["sho_approval_status"] or "PENDING_REVIEW"
+    if sho_status != "APPROVED":
+        conn.close()
+        raise HTTPException(
+            status_code=403,
+            detail=f"Statutory Enforcement Block (BNSS Sec 173): Case is not approved for inter-agency dispatch. Current Status: {sho_status}. Supervisory Remarks: '{case_row['sho_remarks'] or 'Awaiting SHO scrutiny'}'. The FIR and evidence must be verified as genuine and approved by the Station House Officer (SHO) or SP before external cryptographic transmission."
+        )
+
     share_id = f"SHR-{uuid.uuid4().hex[:10].upper()}"
     now = datetime.now(timezone.utc)
     expires_at = (now + timedelta(days=payload.validity_days)).isoformat()
     wrapped_key_sim = f"ECIES-WRAPPED-KEY-{payload.recipient_dept}-{uuid.uuid4().hex[:16]}"
 
+    content_mode_str = payload.content_mode or "BOTH"
     target_desc = f"{payload.recipient_dept}"
     if payload.target_state and payload.target_district:
         target_desc += f" [{payload.target_state} / {payload.target_district}"
@@ -73,7 +85,7 @@ def grant_targeted_sharing(
             target_desc += f" - {payload.target_dept}"
         if payload.target_role and payload.target_role != "ANY_AUTHORIZED_PERSONNEL":
             target_desc += f" - Role:{payload.target_role}"
-        target_desc += "]"
+        target_desc += f" - Content:{content_mode_str}]"
 
     # Commit to blockchain ledger
     ledger_res = SovereignConsortiumLedger.transfer_custody(
@@ -82,13 +94,13 @@ def grant_targeted_sharing(
         from_dept=f"{user.get('state')} Police ({user.get('station_id')})",
         to_dept=target_desc,
         transferred_by=user.get("sub"),
-        remarks=f"{payload.statutory_purpose or payload.remarks} (Scope: {payload.permission})"
+        remarks=f"{payload.statutory_purpose or payload.remarks} (Scope: {payload.permission} | Mode: {content_mode_str})"
     )
 
     cursor.execute(
         """INSERT INTO targeted_shares 
-        (share_id, case_id, document_id, originating_dept, recipient_dept, permission, wrapped_key, granted_by, granted_at, expires_at, status, target_state, target_district, target_dept, target_role, statutory_purpose)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?);""",
+        (share_id, case_id, document_id, originating_dept, recipient_dept, permission, wrapped_key, granted_by, granted_at, expires_at, status, target_state, target_district, target_dept, target_role, statutory_purpose, content_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?);""",
         (
             share_id,
             payload.case_id,
@@ -104,7 +116,8 @@ def grant_targeted_sharing(
             payload.target_district,
             payload.target_dept,
             payload.target_role,
-            payload.statutory_purpose
+            payload.statutory_purpose,
+            content_mode_str
         )
     )
 

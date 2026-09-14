@@ -10,7 +10,7 @@ interface WatermarkViewerProps {
 export const WatermarkViewer: React.FC<WatermarkViewerProps> = ({ docId, onClose }) => {
   const [docData, setDocData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"WATERMARK" | "OCR_READER" | "INTEGRITY">("WATERMARK");
+  const [activeTab, setActiveTab] = useState<"RAW_FILE" | "WATERMARK" | "OCR_READER" | "INTEGRITY">("RAW_FILE");
   const [viewMode, setViewMode] = useState<"REDACTED" | "ORIGINAL" | "SIDE_BY_SIDE">("REDACTED");
   const [verificationResult, setVerificationResult] = useState<any>(null);
   const [verifying, setVerifying] = useState(false);
@@ -25,6 +25,12 @@ export const WatermarkViewer: React.FC<WatermarkViewerProps> = ({ docId, onClose
       setDocData(data);
       if (data.is_redacted) {
         setViewMode("REDACTED");
+      }
+      // If image or pdf, open RAW_FILE tab by default
+      if (data.mime_type?.startsWith("image/") || data.mime_type === "application/pdf") {
+        setActiveTab("RAW_FILE");
+      } else {
+        setActiveTab("WATERMARK");
       }
     } catch (err: any) {
       alert(err.message || "Failed to view document.");
@@ -100,32 +106,36 @@ export const WatermarkViewer: React.FC<WatermarkViewerProps> = ({ docId, onClose
           padding: "16px 24px",
           borderBottom: "1px solid var(--border-subtle)",
           display: "flex",
-          alignItems: "center",
           justifyContent: "space-between",
-          background: "rgba(7, 19, 36, 0.95)"
+          alignItems: "center"
         }}>
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <FileText size={20} color="#38bdf8" />
-              <h3 style={{ fontSize: "1.1rem", color: "#f8fafc" }}>
-                {docData.file_name}
-              </h3>
-              <span className="gov-badge badge-blue">{docData.file_type}</span>
-              {docData.is_redacted && (
-                <span className="gov-badge badge-gold">BNS Sec 72 Redacted</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="mono" style={{ fontSize: "0.88rem", fontWeight: 700, color: "#38bdf8" }}>
+                {docData?.document_id}
+              </span>
+              <span className="gov-badge badge-blue">{docData?.file_type}</span>
+              {docData?.is_redacted && (
+                <span className="gov-badge badge-red">Redacted (BNS 72)</span>
               )}
             </div>
-            <div className="mono" style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "4px" }}>
-              SHA-256: {docData.content_hash} &bull; Case ID: {docData.case_id}
+            <div style={{ fontSize: "1.1rem", fontWeight: 600, color: "#f8fafc", marginTop: "4px" }}>
+              {docData?.file_name}
             </div>
           </div>
 
-          <button className="btn btn-secondary" style={{ padding: "6px 12px" }} onClick={onClose}>
-            Close
-          </button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button className="btn btn-secondary" style={{ padding: "6px 12px", fontSize: "0.8rem" }} onClick={handleLoadCertificate}>
+              <Award size={14} color="#f59e0b" />
+              BSA Sec 63 Certificate
+            </button>
+            <button className="btn btn-secondary" style={{ padding: "6px 12px", fontSize: "0.8rem" }} onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
 
-        {/* Primary Navigation Tabs */}
+        {/* Tab Navigation */}
         <div style={{
           padding: "0 24px",
           background: "#081628",
@@ -133,6 +143,25 @@ export const WatermarkViewer: React.FC<WatermarkViewerProps> = ({ docId, onClose
           display: "flex",
           gap: "8px"
         }}>
+          <button
+            className={`btn ${activeTab === "RAW_FILE" ? "btn-primary" : "btn-secondary"}`}
+            style={{
+              padding: "10px 16px",
+              borderRadius: "0",
+              borderTop: "none",
+              borderLeft: "none",
+              borderRight: "none",
+              borderBottom: activeTab === "RAW_FILE" ? "2px solid #38bdf8" : "none",
+              background: "transparent",
+              fontSize: "0.82rem",
+              color: activeTab === "RAW_FILE" ? "#38bdf8" : "#94a3b8"
+            }}
+            onClick={() => setActiveTab("RAW_FILE")}
+          >
+            <Eye size={15} />
+            Raw Original Evidence File
+          </button>
+
           <button
             className={`btn ${activeTab === "WATERMARK" ? "btn-primary" : "btn-secondary"}`}
             style={{
@@ -143,12 +172,13 @@ export const WatermarkViewer: React.FC<WatermarkViewerProps> = ({ docId, onClose
               borderRight: "none",
               borderBottom: activeTab === "WATERMARK" ? "2px solid #38bdf8" : "none",
               background: "transparent",
-              fontSize: "0.82rem"
+              fontSize: "0.82rem",
+              color: activeTab === "WATERMARK" ? "#38bdf8" : "#94a3b8"
             }}
             onClick={() => setActiveTab("WATERMARK")}
           >
-            <Eye size={15} />
-            Watermarked Evidence View
+            <FileText size={15} />
+            Watermarked Statutory Text
           </button>
 
           <button
@@ -180,7 +210,8 @@ export const WatermarkViewer: React.FC<WatermarkViewerProps> = ({ docId, onClose
               borderRight: "none",
               borderBottom: activeTab === "INTEGRITY" ? "2px solid #38bdf8" : "none",
               background: "transparent",
-              fontSize: "0.82rem"
+              fontSize: "0.82rem",
+              color: activeTab === "INTEGRITY" ? "#38bdf8" : "#94a3b8"
             }}
             onClick={() => setActiveTab("INTEGRITY")}
           >
@@ -188,6 +219,97 @@ export const WatermarkViewer: React.FC<WatermarkViewerProps> = ({ docId, onClose
             Blockchain Integrity &amp; Certificate
           </button>
         </div>
+
+        {/* TAB 0: RAW ORIGINAL EVIDENCE FILE VIEW */}
+        {activeTab === "RAW_FILE" && (
+          <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "#030712" }}>
+            <div style={{
+              padding: "10px 24px",
+              background: "#061120",
+              borderBottom: "1px solid var(--border-subtle)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
+            }}>
+              <div style={{ fontSize: "0.82rem", color: "#f8fafc", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>MIME: <strong style={{ color: "#38bdf8" }}>{docData.mime_type || "Unknown"}</strong></span>
+                &bull;
+                <span>Size: <strong style={{ color: "#34d399" }}>{docData.file_size_bytes ? `${(docData.file_size_bytes / 1024).toFixed(1)} KB` : "N/A"}</strong></span>
+                &bull;
+                <span>SHA-256: <span className="mono" style={{ color: "#f59e0b" }}>{docData.content_hash?.substring(0, 16)}...</span></span>
+              </div>
+              <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>
+                Decrypted In-Memory Only &bull; Zero Disk Cache
+              </span>
+            </div>
+
+            <div style={{ padding: "20px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
+              {/* Dynamic Watermark Overlay */}
+              <div style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%) rotate(-30deg)",
+                opacity: 0.15,
+                fontSize: "1.25rem",
+                fontWeight: 800,
+                color: "#f59e0b",
+                pointerEvents: "none",
+                zIndex: 20,
+                whiteSpace: "nowrap",
+                textAlign: "center",
+                width: "90%"
+              }}>
+                {watermarkString}
+              </div>
+
+              {docData.raw_file_b64 ? (
+                docData.mime_type?.startsWith("image/") ? (
+                  <div style={{ textAlign: "center", maxWidth: "100%", maxHeight: "100%" }}>
+                    <img 
+                      src={`data:${docData.mime_type};base64,${docData.raw_file_b64}`} 
+                      alt={docData.file_name}
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: "65vh",
+                        objectFit: "contain",
+                        borderRadius: "8px",
+                        border: "1px solid rgba(56, 189, 248, 0.4)",
+                        boxShadow: "0 10px 30px rgba(0, 0, 0, 0.7)"
+                      }} 
+                    />
+                  </div>
+                ) : docData.mime_type === "application/pdf" ? (
+                  <iframe 
+                    src={`data:application/pdf;base64,${docData.raw_file_b64}#toolbar=0`} 
+                    style={{ width: "100%", height: "65vh", border: "1px solid var(--border-subtle)", borderRadius: "6px" }} 
+                    title={docData.file_name}
+                  />
+                ) : (
+                  <div style={{
+                    background: "#061120",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: "6px",
+                    padding: "20px",
+                    width: "100%",
+                    maxHeight: "65vh",
+                    overflowY: "auto",
+                    fontFamily: "monospace",
+                    fontSize: "0.86rem",
+                    color: "#f8fafc",
+                    whiteSpace: "pre-wrap"
+                  }}>
+                    {docData.extracted_text || atob(docData.raw_file_b64)}
+                  </div>
+                )
+              ) : (
+                <div style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                  Raw file bytes unavailable. View statutory OCR text below.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* TAB 1: WATERMARKED VIEW */}
         {activeTab === "WATERMARK" && (

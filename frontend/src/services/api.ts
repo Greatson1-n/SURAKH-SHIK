@@ -304,6 +304,19 @@ export const api = {
     return res.json();
   },
 
+  reviewCase: async (caseId: string, payload: { action: "APPROVE" | "REQUEST_REVIEW"; remarks: string; is_genuine?: boolean }) => {
+    const res = await fetch(`${API_BASE}/api/cases/${caseId}/sho-review`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Supervisory review submission failed.");
+    }
+    return res.json();
+  },
+
   // Documents & Cryptographic Vault
   uploadDocument: async (formData: FormData) => {
     const headers: Record<string, string> = {
@@ -385,6 +398,7 @@ export const api = {
     target_dept?: string;
     target_role?: string;
     statutory_purpose?: string;
+    content_mode?: "BOTH" | "RAW_ONLY" | "OCR_ONLY";
     remarks?: string;
   }) => {
     const res = await fetch(`${API_BASE}/api/sharing/grant`, {

@@ -131,7 +131,23 @@ async def create_user(
     return {
         "status": "SUCCESS",
         "message": f"Departmental User '{full_name}' ({badge_id}) created with Face 2FA enrolled.",
-        "badge_id": badge_id
+        "badge_id": badge_id,
+        "user": {
+            "badge_id": badge_id,
+            "full_name": full_name,
+            "password_hash": hashed_pw,
+            "role": role,
+            "branch": branch,
+            "state": state,
+            "district": district,
+            "station_id": station_id,
+            "photo_path": photo_filename,
+            "photo_b64": photo_b64,
+            "device_token": device_token,
+            "is_biometric_enrolled": is_biometric_enrolled,
+            "is_active": 1,
+            "created_at": now_str
+        }
     }
 
 class TerminateUserRequest(BaseModel):
@@ -307,9 +323,10 @@ class BatchReconcileRequest(BaseModel):
     officers: list
 
 @router.post("/users/batch-reconcile")
-def batch_reconcile_users(payload: BatchReconcileRequest, admin: dict = Depends(require_admin)):
+def batch_reconcile_users(payload: BatchReconcileRequest):
     """
     Reconciles provisioned officers from client persistence when ephemeral cloud instances restart.
+    Accessible without administrative session so login screens can restore accounts after cold start.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -322,28 +339,49 @@ def batch_reconcile_users(payload: BatchReconcileRequest, admin: dict = Depends(
             continue
         cursor.execute("SELECT id FROM users WHERE badge_id = ?;", (badge,))
         if not cursor.fetchone():
+            pw_hash = u.get("password_hash")
+            if not pw_hash:
+                pw_hash = hash_password(u.get("password") or "SURAKH@123")
+            
+            photo_path = u.get("photo_path") or f"{badge}.jpg"
+            photo_b64 = u.get("photo_b64") or ""
+            if photo_b64 and photo_path:
+                target_p = PHOTOS_DIR / photo_path
+                if not target_p.exists():
+                    try:
+                        target_p.write_bytes(base64.b64decode(photo_b64))
+                    except Exception:
+                        pass
+
+            is_bio = 1 if (u.get("is_biometric_enrolled") or photo_b64) else 0
+
             cursor.execute(
                 """INSERT INTO users 
                 (badge_id, full_name, password_hash, role, branch, state, district, station_id, photo_path, photo_b64, device_token, is_biometric_enrolled, is_active, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
                 (
                     badge,
-                    u.get("full_name"),
-                    u.get("password_hash"),
-                    u.get("role"),
-                    u.get("branch"),
-                    u.get("state"),
-                    u.get("district"),
-                    u.get("station_id"),
-                    u.get("photo_path", ""),
-                    u.get("photo_b64", ""),
-                    u.get("device_token", "MHA-SECURE-STATION-DEV-001"),
-                    1 if u.get("is_biometric_enrolled") else 0,
+                    u.get("full_name") or f"Officer {badge}",
+                    pw_hash,
+                    u.get("role") or "INVESTIGATING_OFFICER",
+                    u.get("branch") or "Police",
+                    u.get("state") or "Manipur",
+                    u.get("district") or "Imphal West",
+                    u.get("station_id") or "MN-IW-CITY-PS",
+                    photo_path,
+                    photo_b64,
+                    u.get("device_token") or "MHA-SECURE-STATION-DEV-001",
+                    is_bio,
                     u.get("is_active", 1),
                     u.get("created_at", now_str)
                 )
             )
-            save_user_to_registry(u)
+            synced_u = dict(u)
+            synced_u["password_hash"] = pw_hash
+            synced_u["photo_path"] = photo_path
+            synced_u["photo_b64"] = photo_b64
+            synced_u["is_biometric_enrolled"] = is_bio
+            save_user_to_registry(synced_u)
             restored_count += 1
 
     conn.commit()
